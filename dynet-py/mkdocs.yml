@@ -1,0 +1,28 @@
+site_name: dynet-py
+site_description: Python package for dynamic network rewiring analysis
+repo_name: dynet-py
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
+  - CLI: cli.md
+  - API Reference: api.md
+  - Development: development.md
+  - FAQ: faq.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
