@@ -1,0 +1,41 @@
+"0","```r
+
+library(ggVennDiagram)
+
+# cell type intersections
+celltypenaive1 <- cellcompint |> filter(state == 'UC_inflamed_naive') |> pull(source_cell) 
+celltypenaive2 <- cellcompint |> filter(state == 'UC_inflamed_naive') |> pull(target_cell) 
+celltypenaive <- c(celltypenaive1,celltypenaive2) |> unique()
+
+ct1 <- cellcompint |> filter(state == 'UC_inflamed_treated') |> pull(source_cell) 
+ct2 <- cellcompint |> filter(state == 'UC_inflamed_treated') |> pull(target_cell) 
+ct <- c(ct1,ct2) |> unique()
+
+ch1 <- cellcompint |> filter(state == 'healthy') |> pull(source_cell) 
+ch2 <- cellcompint |> filter(state == 'healthy') |> pull(target_cell) 
+ch <- c(ch1,ch2) |> unique()
+
+celltypes<-list(inflamed_naive = celltypenaive, inflamed_treated = ct, healthy = ch)
+ggVennDiagram(celltypes)+ scale_fill_distiller(palette = \"YlGn\", direction = 1)+ guides(fill=guide_legend(title=\"Overlapping cell types\"))
+
+cll <- Venn(celltypes)
+cll
+discern_overlap(cll, 2:3)
+
+# cell number fodl change?
+n1<-cellcompint |> filter(state == 'UC_inflamed_naive') |> group_by(source_cell) |> tally() |> dplyr::rename(cell = source_cell)
+n2 <- cellcompint |> filter(state == 'UC_inflamed_naive') |> group_by(target_cell) |> tally() |> dplyr::rename(cell = target_cell)
+naive <- n1 |> left_join(n2)
+naive$state <- 'UC_inflamed_naive'
+h1<-cellcompint |> filter(state == 'healthy') |> group_by(source_cell) |> tally() |> dplyr::rename(cell = source_cell)
+h2 <- cellcompint |> filter(state == 'healthy') |> group_by(target_cell) |> tally() |> dplyr::rename(cell = target_cell)
+healthy <- h1 |> left_join(h2)
+healthy$state <- 'healthy'
+t1<-cellcompint |> filter(state == 'UC_inflamed_treated') |> group_by(source_cell) |> tally() |> dplyr::rename(cell = source_cell)
+t2 <- cellcompint |> filter(state == 'UC_inflamed_treated') |> group_by(target_cell) |> tally() |> dplyr::rename(cell = target_cell)
+treated <- t1 |> left_join(t2)
+treated$state <- 'UC_inflamed_treated'
+
+cellints <- rbind(naive, healthy, treated)
+
+```"

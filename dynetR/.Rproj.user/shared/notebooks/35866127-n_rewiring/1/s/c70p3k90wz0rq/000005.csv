@@ -1,0 +1,19 @@
+"0","```r
+
+#top5perstatecd<-rew_cc|> filter(Dnc != 0.5000000000) |> filter(disease == 'CD') |> arrange(desc(Dnc)) |> group_by(state) |> dplyr::slice(1:10) |> pull(name) |> unique()
+
+#topcd<-rew_cc|> filter(Dnc != 0.5000000000)|> filter(degree > 1)  |> filter(disease == 'CD') |>  ggplot(aes(x=reorder(name, Dnc),y=Dnc, group=state))+
+#  scale_x_discrete(limits = rev(top5perstatecd))+
+#  geom_line(aes(color=state),size =1)+
+#  scale_color_manual(values = c('UC_inflamed_naive' = '#E377C2', 'UC_inflamed_treated'='#A05196','UC_noninflamed_treated'='#b2abd2','CD_inflamed_treated'= '#D6272B', #'CD_noninflamed_treated'='#FF7F0E'))+
+#  #  geom_segment( aes(x=name, xend=name, y=0, yend=Dn)) +
+#  geom_point(aes(size=degree, color=state),fill=\"white\",shape=21, stroke=2)+
+#  scale_color_manual(values = c('UC_inflamed_naive' = '#E377C2', 'UC_inflamed_treated'='#A05196','UC_noninflamed_treated'='#b2abd2','CD_inflamed_treated'= '#D6272B', #'CD_noninflamed_treated'='#FF7F0E'))+
+#  scale_size_continuous(range=c(2,11))+
+#  coord_flip()+cowplot::theme_minimal_grid()+xlab('Cytokine')+
+#  ylab('Weighted rewiring score (degree corrected) compared to health')+ theme_hc(base_size = 16) + theme(panel.grid.major.y = element_line( size=.1, #color=\"black\"))+geom_hline(yintercept=0, color=\"#2CA02C\", size=1) +facet_wrap(~disease)+ theme(legend.text=element_text(size=10))+
+#  guides(color=guide_legend(nrow=2,byrow=TRUE))
+#topcd
+#ggsave(topcd, file='../figures/cd_cci_rewiring_weighted_corrected.png', width = 10, height = 10, dpi =300)
+
+```"

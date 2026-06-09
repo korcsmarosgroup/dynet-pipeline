@@ -1,0 +1,20 @@
+"0","```r
+
+top_naive_nodes_out<-fc2 |> dplyr::filter(state == 'uc_inflamed_naive_FC') |> dplyr::filter(logFC == 15) |> as_tbl_graph() |> mutate(degree = centrality_degree(mode='out')) |> as_tibble() |> filter(degree >=5) |>  arrange(-degree) 
+top_naive_nodes_plot_out<-ggplot(top_naive_nodes_out, aes(x=reorder(name, degree), y=degree)) +
+   geom_bar(stat = 'identity',fill=\"#E377C2\", width=0.85) +
+  coord_flip() +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )+
+  xlab('Cytokine')+
+  ylab('Outgoing interactions')
+top_naive_nodes_plot_out
+ggsave(top_naive_nodes_plot_out, file = '../figures/top_naive_nodes_plot_out_bar.png', width = 3, height = 4, dpi = 600)
+
+```"

@@ -1,0 +1,33 @@
+"0","```r
+library(ggVennDiagram)
+# upreg shared
+nup<-fc2 |> filter(state =='uc_inflamed_naive_FC' & logFC >= 2) |> tidyr::unite(\"interaction\",c(source,target), sep='_') |> pull(interaction)
+iup<-fc2 |> filter(state =='uc_inflamed_treated_FC' & logFC >= 2) |> tidyr::unite(\"interaction\",c(source,target), sep='_')|> pull(interaction)
+niup<-fc2 |> filter(state =='uc_noninflamed_treated_FC' & logFC >= 2) |> tidyr::unite(\"interaction\",c(source,target), sep='_')|> pull(interaction)
+
+x = list(
+  'UC\ninflamed\nnaive'=nup,
+  'UC\ninflamed\ntreated'=iup,
+  'UC\nnoninflamed treated'=niup)
+venn = Venn(x)
+
+upint<-overlap(venn) |> as.data.frame() |> separate('overlap(venn)', into = c('source','target')) |> write_tsv('venn_up_int.tsv')
+
+upgr<-upint |> as_tbl_graph() |>  jhcutils::get_giant_component() |> activate(nodes) |> mutate(degree = centrality_degree(mode='all')) |> 
+  ggraph(layout='stress')+
+  geom_edge_link(aes(start_cap = label_rect(node1.name),
+                     end_cap = label_rect(node2.name)),
+                 color = 'darkred',arrow = arrow(type = \"closed\", length = unit(2, \"mm\")),alpha = 0.8)+
+  geom_node_label(aes(label=name), repel=F)+
+  theme_void()+
+  theme(
+    panel.background = element_rect(fill='transparent'),
+    plot.background = element_rect(fill='transparent', color=NA),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.background = element_rect(fill='transparent'),
+    legend.box.background = element_rect(fill='transparent')
+  )
+upgr
+ggsave(upgr, file = '../figures/up_venn_graph.png', width = 8, height = 6, dpi=600)
+```"

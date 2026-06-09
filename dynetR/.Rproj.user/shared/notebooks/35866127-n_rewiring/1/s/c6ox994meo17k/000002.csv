@@ -1,0 +1,15 @@
+"0","```r
+#fc2 |> filter(state == 'uc_inflamed_naive_FC' & logFC >= 2) |> write_tsv('naive_upregulated_edges.tsv')
+#fc2 |> filter(state == 'uc_inflamed_naive_FC') |> write_tsv('naive_all_edges.tsv')
+
+naive_up_edges<-fc2 |> filter(state == 'uc_inflamed_naive_FC' & logFC >= 2) |> as_tbl_graph() |> activate(nodes) |> mutate(degree = centrality_degree(mode = 'all')) |> 
+  ggraph('sugiyama', maxiter=100, hgap = 250)+
+  geom_edge_link(color = '#E377C2',arrow = arrow(type = \"closed\", length = unit(2, \"mm\")), start_cap = circle(3, 'mm'), end_cap = circle(3, \"mm\"), width =0.5, alpha = 0.8) +
+  geom_node_point(aes(size = degree), shape = 21, fill='white') + 
+  geom_node_text(aes(filter = (degree > 0),label = name), size=3,  fontface = 'bold',  repel=T, max.overlaps = 10, show.legend = F)+
+  #scale_size_continuous(range = c(3,7))+
+theme_graph() 
+naive_up_edges
+ggsave(naive_up_edges, file = '../figures/naive_up_edges.png', width = 14, height = 10, dpi = 600)
+ 
+```"

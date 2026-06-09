@@ -1,0 +1,28 @@
+"0","```r
+
+# largest rew diff
+# Dnc!=0.5 filter ensures that rewiring is not due to node missing in one state or the other
+top5uc<-rew_cc |> filter(Dnc != 0.5000000000) |> filter(degree > 1) |> filter(disease == 'UC') |> arrange(desc(Dnc))
+top5perstateuc<-rew_cc|> filter(Dnc != 0.5000000000) |> filter(disease == 'UC') |> arrange(desc(Dnc)) |> group_by(state) |> dplyr::slice(1:10) |> head(15)|> pull(name) |> unique()
+
+topuc<-rew_cc |> filter(name %in% top5perstateuc & disease == 'UC')|>  ggplot(aes(x=reorder(name, Dnc),y=Dnc, group=state))+
+  scale_x_discrete(limits = top5perstateuc)+
+  geom_line(aes(color=state),size =1)+
+  scale_color_manual(values = c('UC_inflamed_naive' = '#E377C2', 'UC_inflamed_treated'='#A05196','UC_noninflamed_treated'='#b2abd2','CD_inflamed_treated'= '#D6272B', 'CD_noninflamed_treated'='#FF7F0E'))+
+  #geom_segment( aes(x=name, xend=name, y=0, yend=Dn)) +
+  geom_point(aes(size=degree, color=state))+
+  scale_color_manual(values = c('UC_inflamed_naive' = '#E377C2', 'UC_inflamed_treated'='#A05196','UC_noninflamed_treated'='#b2abd2','CD_inflamed_treated'= '#D6272B', 'CD_noninflamed_treated'='#FF7F0E'))+
+  scale_size_continuous(range=c(2,11))+
+  #coord_flip()+
+  cowplot::theme_minimal_grid()+xlab('Cytokine')+
+  ylab('Weighted rewiring score (degree corrected) compared to health')+ theme_hc(base_size = 16) +geom_hline(yintercept=0, color=\"#2CA02C\", size=1) + theme(legend.text=element_text(size=14))+
+  guides(color=guide_legend(nrow=2,byrow=TRUE))#+xlim(0,0.7)
+```"
+"1","Warning: Using `size` aesthetic for lines was deprecated in ggplot2 3.4.0.
+Please use `linewidth` instead.Scale for colour is already present.
+Adding another scale for colour, which will replace the existing scale.
+"
+"0","```r
+topuc
+ggsave(topuc, file='../figures/uc_cci_rewiring_weighted_corrected.png', width = 11, height = 9, dpi =600)
+```"

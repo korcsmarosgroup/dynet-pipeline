@@ -1,0 +1,24 @@
+"0","```r
+# weighted rewiring
+dncyt<-read_csv('comparisons/cc_nw_all.csv')|> dplyr::select(name, `DyNet Rewiring (Dn-score)`, `Edge Count`) |> dplyr::rename(Dn = `DyNet Rewiring (Dn-score)`, degree = `Edge Count`)
+```"
+"1","Rows: 119 Columns: 12── Column specification ──────────────────────────────────────────────────────────────────────────────────
+Delimiter: \",\"
+chr (2): name, shared name
+dbl (3): Dn-Score (degree corrected), DyNet Rewiring (Dn-score), Edge Count
+lgl (7): CD_inflamed_treated_n_weight.tsv_present, CD_noninflamed_treated_n_weight.tsv_present, health...
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+"
+"0","```r
+topcyt<-dncyt |> arrange(-Dn) |> head(10) |> pull(name)
+
+weighted_rew<-dncyt |> arrange(-Dn) |> head(10) |> ggplot(aes(x=fct_relevel(name, rev(topcyt)),y=Dn))+
+  geom_point(aes(size=degree, fill = Dn), shape = 21)+
+  scale_fill_gradient(low = 'grey90', high='darkred')+
+  scale_size_continuous(range=c(3,9))+
+  coord_flip()+
+  ylab('Weighted rewiring score')+xlab('Cytokine')+ theme_hc(base_size = 22)+theme(legend.position = 'right')
+weighted_rew
+ggsave(weighted_rew, file='../figures/weighted_rewiring.png', width = 14, height = 10, dpi =300)
+```"

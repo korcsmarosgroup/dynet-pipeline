@@ -1,0 +1,69 @@
+"0","```r
+library(tidyverse)
+library(ggraph)
+library(tidygraph)
+```"
+"1","
+Attaching package: ‘tidygraph’
+
+The following object is masked from ‘package:stats’:
+
+    filter
+"
+"0","```r
+library(igraph)
+```"
+"1","
+Attaching package: ‘igraph’
+
+The following object is masked from ‘package:tidygraph’:
+
+    groups
+
+The following objects are masked from ‘package:lubridate’:
+
+    %--%, union
+
+The following objects are masked from ‘package:dplyr’:
+
+    as_data_frame, groups, union
+
+The following objects are masked from ‘package:purrr’:
+
+    compose, simplify
+
+The following object is masked from ‘package:tidyr’:
+
+    crossing
+
+The following object is masked from ‘package:tibble’:
+
+    as_data_frame
+
+The following objects are masked from ‘package:stats’:
+
+    decompose, spectrum
+
+The following object is masked from ‘package:base’:
+
+    union
+"
+"0","```r
+library(ggbump)
+library(ggthemes)
+library(patchwork)
+library(ggrepel)
+library(rstatix)
+```"
+"1","
+Attaching package: ‘rstatix’
+
+The following object is masked from ‘package:stats’:
+
+    filter
+"
+"0","```r
+#load weighted networks
+# CD70 was accidentally included, filtering it out
+comp<-readRDS('../rds/cci_n.rds') |> bind_rows() 
+```"

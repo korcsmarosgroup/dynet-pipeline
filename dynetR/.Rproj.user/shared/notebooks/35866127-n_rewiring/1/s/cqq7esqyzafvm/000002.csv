@@ -1,0 +1,22 @@
+"0","```r
+jaccard_comps <- rbind(comp_uc_h_jaccard, comp_uci_h_jaccard, comp_ucni_h_jaccard) |> unique()
+hfc_jaccard <- cc_long_FC |> filter(state == 'healthy_FC') |> filter(healthy != 0 & logFC == 0)
+hfc_jaccard$Jaccard <- as.double(1)
+jaccard_comps <- rbind(jaccard_comps, hfc_jaccard)
+
+hits <-rew_cc|> filter(Dnc != 0.5000000000) |> filter(disease == 'UC') |> arrange(desc(Dnc)) |> group_by(state) |> dplyr::slice(1:10) |> head(15)|> pull(name) |> unique()
+res <- list()
+for (i in hits){
+  df <- jaccard_comps |> dplyr::filter(source == paste0(i) | target == paste0(i))
+  df$cyt <- paste0(i)
+  res[[i]]<-df
+}
+out<-bind_rows(res) |> filter(state == 'uc_inflamed_naive_FC' | state == 'uc_inflamed_treated_FC' | state == 'uc_noninflamed_treated_FC' | state == 'healthy_FC' )
+sts <- out$state |> unique()
+
+for (k in hits){
+for (j in sts){
+  out |> filter(cyt == paste0(k)) |> filter(state == paste0(j)) |> filter(logFC != -15) |> write_tsv(paste0('comparisons/',k,'_',j,'_jaccard_toprew.tsv'))
+    }
+  }
+```"

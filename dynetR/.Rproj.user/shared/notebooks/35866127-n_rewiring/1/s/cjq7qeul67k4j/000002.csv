@@ -1,0 +1,17 @@
+"0","```r
+fc2 |> filter(state == 'uc_inflamed_naive_FC') |> mutate(DEG = case_when(logFC >=2 ~'up',
+                                                                         logFC <=-2 ~ 'down',
+                                                                         TRUE ~ 'neutral')) |> as_tbl_graph() |> activate(nodes) |> mutate(indeg_groups = ifelse(
+    centrality_degree(mode = 'in') < 5, 'few',
+    ifelse(centrality_degree(mode = 'in') >= 15, 'many', 'medium')
+  ), degree = centrality_degree(mode='all')) |> 
+ggraph('hive', axis = indeg_groups, sort.by = degree) + 
+  geom_edge_hive(aes(colour = logFC)) + 
+  scale_edge_colour_gradient2(low = \"#88BBD7\",
+                              mid = \"#FFFECA\",
+                              high = \"#EA6B4E\",
+                              )+
+  geom_axis_hive(aes(colour = indeg_groups), size = 2, label = FALSE) +
+  coord_fixed()+
+  facet_edges(~DEG)
+```"

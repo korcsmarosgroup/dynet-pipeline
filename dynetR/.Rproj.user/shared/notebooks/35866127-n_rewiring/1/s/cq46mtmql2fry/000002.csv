@@ -1,0 +1,22 @@
+"0","```r
+#list to jc
+jc_naive_healthy <- bind_rows(results) |> t() |> as.data.frame() |> rownames_to_column('interaction') |> dplyr::rename(Jaccard = V1)
+compjc <-jc_naive_healthy |> separate(interaction, into = c('source','target'))
+comp_uc_h_jaccard<- fc2 |> dplyr::filter(state == 'uc_inflamed_naive_FC') |> left_join(compjc) |> write_tsv('naive_jaccard_fc.tsv')
+```"
+"1","Joining with `by = join_by(source, target)`
+"
+"0","```r
+jc_inflamed_healthy <- bind_rows(results1) |> t() |> as.data.frame() |> rownames_to_column('interaction') |> dplyr::rename(Jaccard = V1)
+compjci <-jc_inflamed_healthy |> separate(interaction, into = c('source','target'))
+comp_uci_h_jaccard<- fc2 |> dplyr::filter(state == 'uc_inflamed_treated_FC') |> left_join(compjci) |> write_tsv('inflamed_jaccard_fc.tsv')
+```"
+"1","Joining with `by = join_by(source, target)`
+"
+"0","```r
+jc_noninflamed_healthy <- bind_rows(results2) |> t() |> as.data.frame() |> rownames_to_column('interaction') |> dplyr::rename(Jaccard = V1)
+compjcni <-jc_noninflamed_healthy |> separate(interaction, into = c('source','target'))
+comp_ucni_h_jaccard<- fc2 |> dplyr::filter(state == 'uc_noninflamed_treated_FC') |> left_join(compjcni) |> write_tsv('noninflamed_jaccard_fc.tsv')
+```"
+"1","Joining with `by = join_by(source, target)`
+"

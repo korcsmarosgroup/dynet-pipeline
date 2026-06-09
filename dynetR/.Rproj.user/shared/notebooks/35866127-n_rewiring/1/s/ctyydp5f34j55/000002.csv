@@ -1,0 +1,22 @@
+"0","```r
+otnew <- read_tsv('~/Downloads/OT-EFO_0000729-associated-targets-01_02_2024-v23_12.tsv') |> select(symbol, globalScore, maxClinicalTrialPhase)
+
+```"
+"1","Rows: 7817 Columns: 41── Column specification ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Delimiter: \"\t\"
+chr (40): symbol, otGeneticsPortal, eva, geneBurden, genomicsEngland, gene2Phenotype, uniprotLiterature, uniprotVariants, orphanet, clingen, cancerGeneCensus, intogen, evaSo...
+dbl  (1): globalScore
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+"
+"0","```r
+otnew <- otnew |> mutate(maxClinicalTrialPhase = case_when(
+  maxClinicalTrialPhase == 1 ~ 'IV',
+  maxClinicalTrialPhase == 0.75 ~ 'III',
+  maxClinicalTrialPhase == 0.5 ~ 'II',
+  maxClinicalTrialPhase == 0.25 ~ 'I',
+  TRUE ~ as.character(maxClinicalTrialPhase)
+))
+otewnames <- otnew$symbol |> unique()
+
+```"

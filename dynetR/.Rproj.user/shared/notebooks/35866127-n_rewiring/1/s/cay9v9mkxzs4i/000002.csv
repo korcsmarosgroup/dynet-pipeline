@@ -1,0 +1,44 @@
+"0","```r
+naive <- comp |> filter(state == 'UC_inflamed_naive')
+naive_no_TNF <- comp |> filter(state == 'UC_inflamed_naive') |> dplyr::filter(!source == 'TNF') |> dplyr::filter(!target == 'TNF')
+compare_state <- function(ingraph1, ingraph2){
+  nv <- ingraph1 |> as_tbl_graph() |> activate(nodes) |> mutate(degree = centrality_degree(mode='all'),
+                                                                                                     betweenness = centrality_betweenness(directed = T)) |> as_tibble()
+  tr <- ingraph2  |> as_tbl_graph() |> activate(nodes) |> mutate(degree = centrality_degree(mode='all'),
+                                                                    betweenness = centrality_betweenness(directed = T)) |> as_tibble()
+  compare <- nv |> left_join(tr, by = 'name', suffix = c('_naive','_treated')) |> mutate(
+    deltaDegree = abs(degree_naive - degree_treated),
+    deltaBtw = abs(betweenness_naive - betweenness_treated)
+  )|> arrange(-deltaDegree)
+  return(compare)
+}
+deltas <- compare_state(naive, naive_no_TNF)
+
+ddeg <- deltas |> select(name, degree_naive,degree_treated,deltaDegree)
+dbts <- deltas |> select(name,betweenness_naive,betweenness_treated, deltaBtw)
+#top delta degrees
+topdeg <- ddeg |> arrange(-deltaDegree) |> head(5) |> pull(name)
+pdeg<-ddeg |> filter(name %in% topdeg) |>  
+  ggplot()+
+  geom_segment( aes(x=reorder(name, degree_naive), xend=name, y=degree_treated, yend=degree_naive), color=\"gray22\") +
+  geom_point( aes(x=reorder(name, degree_naive), y=degree_treated),color =  '#A05196', size=3 ) +
+  geom_point( aes(x=reorder(name, degree_naive), y=degree_naive), size=3, color = '#E377C2' ) +
+  scale_size_continuous(range=c(2,7))+
+  coord_flip()+theme_hc(base_size = 16)+
+  xlab('Cytokine')+
+  ylab('∆ degree')
+pdeg
+# top delta btw
+topbtw <- dbts |> arrange(-deltaBtw) |> head(10) |> pull(name)
+pbtw<-dbts |> filter(name %in% topbtw) |>  
+  ggplot()+
+  geom_segment( aes(x=reorder(name, betweenness_naive), xend=name, y=betweenness_treated, yend=betweenness_naive), color=\"gray22\") +
+  geom_point( aes(x=reorder(name, betweenness_naive), y=betweenness_treated),shape =  17, size=3, color = 'lightblue' ) +
+  geom_point( aes(x=reorder(name, betweenness_naive), y=betweenness_naive), size=3, shape =15, color = '#E377C2') +
+  scale_size_continuous(range=c(2,7))+
+  ylim(0,1275)+
+  coord_flip()+theme_hc(base_size = 16)+
+  xlab('Cytokine')+
+  ylab('∆ betweenness centrality')
+pbtw
+```"

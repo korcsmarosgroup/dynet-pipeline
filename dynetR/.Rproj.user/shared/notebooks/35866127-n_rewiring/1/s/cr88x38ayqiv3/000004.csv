@@ -1,0 +1,9 @@
+"0","```r
+
+
+upp<-ggVennDiagram(x)+
+  scale_fill_distiller(palette = \"Reds\", direction = 1)+ theme(legend.position = \"none\")+
+  scale_x_continuous(expand = expansion(mult = .2))
+upp
+ggsave(upp, file = '../figures/up_venn.png', width = 4, height = 6, dpi=600)
+```"

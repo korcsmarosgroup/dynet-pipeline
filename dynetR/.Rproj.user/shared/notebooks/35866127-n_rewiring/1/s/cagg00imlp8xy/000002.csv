@@ -1,0 +1,73 @@
+"0","```r
+#for all ints
+cellcompint <- cellcomp |> tidyr::unite(interaction, c(source,target), sep = '_')
+ints <- cellcompint$interaction |> unique()
+results <- list()
+for (i in ints){
+  uc_i1 <- cellcompint |>filter(interaction == paste0(i) & state == 'UC_inflamed_naive') |> pull(source_cell) |> unique() 
+  uc_i2 <- cellcompint |>filter(interaction == paste0(i) & state == 'UC_inflamed_naive') |> pull(target_cell) |> unique() 
+  hc_i1  <- cellcompint |>filter(interaction == paste0(i) & state == 'healthy') |> pull(source_cell) |> unique() 
+  hc_i2  <- cellcompint |>filter(interaction == paste0(i) & state == 'healthy') |> pull(target_cell) |> unique() 
+  uc_i <- unique(c(uc_i1,uc_i2))
+  hc_i <- unique(c(hc_i1,hc_i2))
+  jc <-length(intersect(uc_i,hc_i)) / length(union(uc_i,hc_i))
+  uc_specific_cells <- setdiff(uc_i, hc_i)
+  health_specific_cells <- setdiff(uc_i, hc_i)
+  shared_cells <- intersect(uc_i, hc_i)
+  #out <- data.frame(
+   # jaccard <- paste0(jc),
+    #uc_specific_cells <- paste(uc_specific_cells, sep=':'),
+    #health_specific_cells<-paste(health_specific_cells, sep=':'),
+    #shared_cells <- paste(shared_cells, sep=':')
+  #)
+  
+  
+  results[[paste0(i)]] <- jc
+}
+
+results1 <- list()
+for (i in ints){
+  uc_i1 <- cellcompint |>filter(interaction == paste0(i) & state == 'UC_inflamed_treated') |> pull(source_cell) |> unique() 
+  uc_i2 <- cellcompint |>filter(interaction == paste0(i) & state == 'UC_inflamed_treated') |> pull(target_cell) |> unique() 
+  hc_i1  <- cellcompint |>filter(interaction == paste0(i) & state == 'healthy') |> pull(source_cell) |> unique() 
+  hc_i2  <- cellcompint |>filter(interaction == paste0(i) & state == 'healthy') |> pull(target_cell) |> unique() 
+  uc_i <- unique(c(uc_i1,uc_i2))
+  hc_i <- unique(c(hc_i1,hc_i2))
+  jc <-length(intersect(uc_i,hc_i)) / length(union(uc_i,hc_i))
+  uc_specific_cells <- setdiff(uc_i, hc_i)
+  health_specific_cells <- setdiff(uc_i, hc_i)
+  shared_cells <- intersect(uc_i, hc_i)
+  #out <- data.frame(
+   # jaccard <- paste0(jc),
+    #uc_specific_cells <- paste(uc_specific_cells, sep=':'),
+    #health_specific_cells<-paste(health_specific_cells, sep=':'),
+    #shared_cells <- paste(shared_cells, sep=':')
+  #)
+  
+  
+  results1[[paste0(i)]] <- jc
+}
+
+results2 <- list()
+for (i in ints){
+  uc_i1 <- cellcompint |>filter(interaction == paste0(i) & state == 'UC_noninflamed_treated') |> pull(source_cell) |> unique() 
+  uc_i2 <- cellcompint |>filter(interaction == paste0(i) & state == 'UC_noninflamed_treated') |> pull(target_cell) |> unique() 
+  hc_i1  <- cellcompint |>filter(interaction == paste0(i) & state == 'healthy') |> pull(source_cell) |> unique() 
+  hc_i2  <- cellcompint |>filter(interaction == paste0(i) & state == 'healthy') |> pull(target_cell) |> unique() 
+  uc_i <- unique(c(uc_i1,uc_i2))
+  hc_i <- unique(c(hc_i1,hc_i2))
+  jc <-length(intersect(uc_i,hc_i)) / length(union(uc_i,hc_i))
+  uc_specific_cells <- setdiff(uc_i, hc_i)
+  health_specific_cells <- setdiff(uc_i, hc_i)
+  shared_cells <- intersect(uc_i, hc_i)
+  #out <- data.frame(
+   # jaccard <- paste0(jc),
+    #uc_specific_cells <- paste(uc_specific_cells, sep=':'),
+    #health_specific_cells<-paste(health_specific_cells, sep=':'),
+    #shared_cells <- paste(shared_cells, sep=':')
+  #)
+  
+  
+  results2[[paste0(i)]] <- jc
+}
+```"

@@ -1,0 +1,53 @@
+"0","```r
+naive<-cc_long_FC |> filter(state == 'uc_inflamed_naive_FC') |>   mutate(logFC = case_when(
+  logFC == -Inf ~ -100,
+  logFC == Inf ~ 100,
+  TRUE ~ as.numeric(logFC))) |> write_tsv('uc_naive_cytoscape_logFC_n.tsv')
+
+treated<-cc_long_FC |> filter(state == 'uc_inflamed_treated_FC') |>   mutate(logFC = case_when(
+  logFC == -Inf ~ -100,
+  logFC == Inf ~ 100,
+  TRUE ~ as.numeric(logFC))) |> write_tsv('uc_treated_cytoscape_logFC_n.tsv')
+
+
+
+prad<-cc_long_FC |> filter(state == 'uc_inflamed_naive_FC' | state == 'uc_inflamed_treated_FC') |> 
+  filter(logFC != -Inf) |> 
+as_tbl_graph() |> 
+  activate(nodes) |> mutate(degree = centrality_degree(mode='all'),betweenness = centrality_betweenness(directed = T)) |> 
+  ggraph(layout='centrality', cent=betweenness) + 
+  geom_edge_link(aes(color = logFC),arrow = arrow(type = \"closed\", length = unit(2, \"mm\")), start_cap = circle(5, 'mm'), end_cap = circle(5, \"mm\"), width =1, alpha = 0.5) +
+  scale_edge_colour_gradient2(low = \"#88BBD7\",
+                              mid = \"#FFFECA\",
+                              high = \"#EA6B4E\",
+                              na.value = '#EA6B4E',
+                              midpoint = 0,breaks=c(-2,-1,0,1,2),
+                              limits=c(-2, 2))+
+  geom_node_point(aes(size = degree), shape=21, fill='white') +
+  geom_node_text(aes(filter = (degree > 20), label=name), size = 8, repel=T, show.legend = F)+
+  theme_graph(base_size = 25)+
+  facet_edges(~state, nrow = 1, ncol =2)+theme(legend.position = 'top')
+
+ggsave(prad, file = '../figures/uc_naive_centrality_logFC)topl.png', width = 24, height = 13, dpi=600)
+
+prad2<-cc_long_FC |> filter(state == 'uc_inflamed_naive_FC' | state == 'uc_inflamed_treated_FC') |> 
+  filter(logFC != -Inf) |> 
+as_tbl_graph() |> 
+  activate(nodes) |> mutate(degree = centrality_degree(mode='all'),betweenness = centrality_betweenness(directed = T)) |> 
+  ggraph(layout='linear', circular = T, weight=degree) + 
+  geom_edge_arc(aes(color = logFC),arrow = arrow(type = \"closed\", length = unit(2, \"mm\")), start_cap = circle(5, 'mm'), end_cap = circle(5, \"mm\"), width =1, alpha = 0.5) +
+  scale_edge_colour_gradient2(low = \"#88BBD7\",
+                              mid = \"#FFFECA\",
+                              high = \"#EA6B4E\",
+                              na.value = '#EA6B4E',
+                              midpoint = 0,breaks=c(-2,-1,0,1,2),
+                              limits=c(-2, 2))+
+  geom_node_point(aes(size = degree)) +
+  geom_node_text(aes(label=name), size = 5, repel=T, show.legend = F)+
+  theme_graph(base_size = 25)+
+  facet_edges(~state, nrow = 1, ncol =2)+theme(legend.position = 'top')
+
+#ggsave(prad2, file = '../figures/uc_naive_centrality_logFC_topl_linear.png', width = 24, height = 13, dpi=600)
+
+
+```"

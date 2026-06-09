@@ -1,0 +1,19 @@
+"0","```r
+#nodes in the upreg edges of naive
+top_naive_nodes<-fc2 |> dplyr::filter(state == 'uc_inflamed_naive_FC') |> dplyr::filter(logFC == 15) |> as_tbl_graph() |> mutate(degree = centrality_degree(mode='in')) |> as_tibble() |>  filter(degree >=5) |>  arrange(-degree) 
+top_naive_nodes_plot<-ggplot(top_naive_nodes, aes(x=reorder(name, degree), y=degree)) +
+  geom_bar(stat = 'identity',fill=\"#E377C2\", width=0.85) +
+  coord_flip() +
+    theme_light() +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )+
+  xlab('Cytokine')+
+  ylab('Incoming interactions')
+top_naive_nodes_plot
+ggsave(top_naive_nodes_plot, file = '../figures/top_naive_nodes_plot_bar.png', width = 3, height = 4, dpi = 600)
+```"

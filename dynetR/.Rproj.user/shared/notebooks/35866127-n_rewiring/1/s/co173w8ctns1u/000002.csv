@@ -1,0 +1,40 @@
+"0","```r
+library(ggradar)
+topdeg <- ddeg |> arrange(-deltaDegree) |> head(10) |> pull(name)
+
+ddd<-ddeg |> select(-deltaDegree) |> filter(name %in% topdeg) |> column_to_rownames('name') |> t() |> as.data.frame() |> as_tibble(rownames = \"group\")
+
+degradar<-ggradar(ddd,
+        values.radar = c(0, 30, 60),
+        grid.min=0, grid.mid = 30, grid.max = 60, group.line.width = 0.5, 
+        group.point.size = 1.25, fill = T,
+            fill.alpha = 0.8,
+            plot.legend = F)+
+  scale_color_manual(values = c('#FE6100','#DC267F'))+
+  scale_fill_manual(values = c('#FE6100','#DC267F'))+
+  xlab('Degree')
+```"
+"1","Scale for colour is already present.
+Adding another scale for colour, which will replace the existing scale.Scale for fill is already present.
+Adding another scale for fill, which will replace the existing scale.
+"
+"0","```r
+ggsave(degradar, file = '../figures/naive_treated_deg_diff_radar.png', width = 5, height = 5, dpi=600)
+
+topbtw <- dbts |> arrange(-deltaBtw) |> head(10) |> pull(name)
+
+bbb<-dbts |> select(-deltaBtw) |> filter(name %in% topbtw) |> column_to_rownames('name') |> t() |> as.data.frame() |> as_tibble(rownames = \"group\")
+
+degbtw<-ggradar(bbb,
+        values.radar = c(0, 340, 675),
+        grid.min=0, grid.mid = 340, grid.max = 675, group.line.width = 0.5, 
+        group.point.size = 1.25, fill = T,
+            fill.alpha = 0.8,
+            plot.legend = F)+
+  scale_color_manual(values = c('#FE6100','#DC267F'))+
+  scale_fill_manual(values = c('#FE6100','#DC267F'))+
+  xlab('Betweenness centrality')
+
+ggsave(degbtw, file = '../figures/naive_treated_btw_diff_radar.png', width = 5, height = 5, dpi=600)
+
+```"

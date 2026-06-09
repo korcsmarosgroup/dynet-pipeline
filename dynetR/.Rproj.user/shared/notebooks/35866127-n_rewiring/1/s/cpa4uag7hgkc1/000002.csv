@@ -1,0 +1,45 @@
+"0","```r
+cc_wide <- comp |> 
+  dplyr::select(source, target, state, weight) |>
+  pivot_wider(names_from = state, values_from = c(weight)) |>
+  mutate_all(funs(replace_na(., 0)))
+
+```"
+"1","`mutate_all()` ignored the following grouping variables:Warning: `funs()` was deprecated in dplyr 0.8.0.
+Please use a list of either functions or lambdas: 
+
+  # Simple named list: 
+  list(mean = mean, median = median)
+
+  # Auto named with `tibble::lst()`: 
+  tibble::lst(mean, median)
+
+  # Using lambdas
+  list(~ mean(., trim = .2), ~ median(., na.rm = TRUE))
+"
+"0","```r
+cc_wide_FC <- cc_wide |> mutate(
+  uc_inflamed_naive_FC = log2(UC_inflamed_naive / healthy),
+  uc_inflamed_treated_FC = log2(UC_inflamed_treated / healthy),
+  uc_noninflamed_treated_FC = log2(UC_noninflamed_treated / healthy),
+  #cd_inflamed_treated_FC = log2(CD_inflamed_treated / healthy),
+  #cd_noninflamed_treated_FC = log2(CD_noninflamed_treated / healthy),
+  healthy_FC = 0
+)
+
+cc_long_FC <- cc_wide_FC |>
+  pivot_longer(cols = uc_inflamed_naive_FC:healthy_FC, names_to = \"state\", values_to = \"logFC\") |> mutate(logFC = case_when(
+    is.nan(logFC) ~ 0,
+    TRUE ~ as.numeric(logFC)
+  ))
+
+cc_long_FC<-cc_long_FC |> select(-contains('st_')) #|> filter(logFC != 0)
+
+hfc <- cc_long_FC |> filter(state == 'healthy_FC') |> filter(healthy != 0 & logFC == 0)
+
+fc2 <- cc_long_FC |> filter(state != 'healthy_FC') |> filter(logFC != 0) |> mutate(logFC = case_when(logFC == Inf ~ 15,
+                                                                   logFC == -Inf ~ -15,
+                                                                   TRUE ~ as.numeric(logFC)))
+fc2<-rbind(fc2, hfc)
+
+```"

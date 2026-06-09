@@ -1,0 +1,70 @@
+"0","```r
+rew_h_i <- read_csv('comparisons/cc_wn_h_vs_uci.csv')|> dplyr::select(name, `DyNet Rewiring (Dn-score)`, `Dn-Score (degree corrected)`,`Edge Count`) |> dplyr::rename(Dn = `DyNet Rewiring (Dn-score)`,Dnc = `Dn-Score (degree corrected)`, degree = `Edge Count`)
+```"
+"1","Rows: 119 Columns: 12── Column specification ──────────────────────────────────────────────────────────────────────────────────
+Delimiter: \",\"
+chr (2): name, shared name
+dbl (3): Dn-Score (degree corrected), DyNet Rewiring (Dn-score), Edge Count
+lgl (7): CD_inflamed_treated_n_weight.tsv_present, CD_noninflamed_treated_n_weight.tsv_present, health...
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+"
+"0","```r
+rew_h_i$state <-'UC_inflamed_treated'
+rew_h_ni <- read_csv('comparisons/cc_wn_h_vs_ucni.csv')|>dplyr::select(name, `DyNet Rewiring (Dn-score)`, `Dn-Score (degree corrected)`,`Edge Count`) |> dplyr::rename(Dn = `DyNet Rewiring (Dn-score)`,Dnc = `Dn-Score (degree corrected)`, degree = `Edge Count`)
+```"
+"1","Rows: 119 Columns: 12── Column specification ──────────────────────────────────────────────────────────────────────────────────
+Delimiter: \",\"
+chr (2): name, shared name
+dbl (3): Dn-Score (degree corrected), DyNet Rewiring (Dn-score), Edge Count
+lgl (7): CD_inflamed_treated_n_weight.tsv_present, CD_noninflamed_treated_n_weight.tsv_present, health...
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+"
+"0","```r
+rew_h_ni$state <-'UC_noninflamed_treated'
+rew_h_na <- read_csv('comparisons/cc_wn_h_vs_ucn.csv')|> dplyr::select(name, `DyNet Rewiring (Dn-score)`, `Dn-Score (degree corrected)`,`Edge Count`) |> dplyr::rename(Dn = `DyNet Rewiring (Dn-score)`,Dnc = `Dn-Score (degree corrected)`, degree = `Edge Count`)
+```"
+"1","Rows: 119 Columns: 12── Column specification ──────────────────────────────────────────────────────────────────────────────────
+Delimiter: \",\"
+chr (2): name, shared name
+dbl (3): Dn-Score (degree corrected), DyNet Rewiring (Dn-score), Edge Count
+lgl (7): CD_inflamed_treated_n_weight.tsv_present, CD_noninflamed_treated_n_weight.tsv_present, health...
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+"
+"0","```r
+rew_h_na$state <-'UC_inflamed_naive'
+rew_h_cdi <- read_csv('comparisons/cc_wn_h_vs_cdi.csv')|> dplyr::select(name, `DyNet Rewiring (Dn-score)`, `Dn-Score (degree corrected)`,`Edge Count`) |> dplyr::rename(Dn = `DyNet Rewiring (Dn-score)`,Dnc = `Dn-Score (degree corrected)`, degree = `Edge Count`)
+```"
+"1","Rows: 119 Columns: 12── Column specification ──────────────────────────────────────────────────────────────────────────────────
+Delimiter: \",\"
+chr (2): name, shared name
+dbl (3): Dn-Score (degree corrected), DyNet Rewiring (Dn-score), Edge Count
+lgl (7): CD_inflamed_treated_n_weight.tsv_present, CD_noninflamed_treated_n_weight.tsv_present, health...
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+"
+"0","```r
+rew_h_cdi$state <-'CD_inflamed_treated'
+rew_h_cdni <- read_csv('comparisons/cc_wn_h_vs_cdni.csv')|> dplyr::select(name, `DyNet Rewiring (Dn-score)`, `Dn-Score (degree corrected)`,`Edge Count`) |> dplyr::rename(Dn = `DyNet Rewiring (Dn-score)`,Dnc = `Dn-Score (degree corrected)`, degree = `Edge Count`)
+```"
+"1","Rows: 119 Columns: 12── Column specification ──────────────────────────────────────────────────────────────────────────────────
+Delimiter: \",\"
+chr (2): name, shared name
+dbl (3): Dn-Score (degree corrected), DyNet Rewiring (Dn-score), Edge Count
+lgl (7): CD_inflamed_treated_n_weight.tsv_present, CD_noninflamed_treated_n_weight.tsv_present, health...
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+"
+"0","```r
+rew_h_cdni$state <-'CD_noninflamed_treated'
+rew_cc <- rbind(rew_h_i,rew_h_ni,rew_h_na,rew_h_cdi,rew_h_cdni) |> mutate(disease = case_when(
+  state == 'UC_inflamed_naive' ~ as.character('UC'),
+  state == 'UC_inflamed_treated' ~ as.character('UC'),
+  state == 'UC_noninflamed_treated' ~ as.character('UC'),
+  state == 'CD_inflamed_treated' ~ as.character('CD'),
+  state == 'CD_noninflamed_treated' ~ as.character('CD'),
+)) |> dplyr::filter(name != 'CD70')
+rew_cc |>group_by(disease)|> wilcox_test(Dnc ~ state)
+```"
