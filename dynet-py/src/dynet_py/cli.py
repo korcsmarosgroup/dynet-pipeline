@@ -47,10 +47,7 @@ def _load_edge_list(path: Path) -> pd.DataFrame:
     required = {"from", "to"}
     if not required.issubset(df.columns):
         raise ValueError(f"{path} must contain columns: from,to[,weight]")
-    if "weight" not in df.columns:
-        df = df.copy()
-        df["weight"] = 1.0
-    return df[["from", "to", "weight"]]
+    return df
 
 
 def main() -> None:
@@ -63,12 +60,9 @@ def main() -> None:
         required = {"network", "from", "to"}
         if not required.issubset(input_df.columns):
             raise ValueError("--input-csv must contain columns: network,from,to[,weight]")
-        if "weight" not in input_df.columns:
-            input_df = input_df.copy()
-            input_df["weight"] = 1.0
         networks = {
-            str(net): grp[["from", "to", "weight"]].reset_index(drop=True)
-            for net, grp in input_df.groupby("network", sort=False)
+            net: grp.drop(columns="network")
+            for net, grp in input_df.groupby("network", sort=False, dropna=False)
         }
     else:
         csv_paths = [Path(p) for p in args.edge_lists]

@@ -186,3 +186,27 @@ without allocating dense adjacency matrices. Rewiring builds and caches matrices
 when needed. `format_indata` uses the same prepared collection and returns copies
 of its adjacency matrices, so editing an exported matrix does not alter the cache.
 The CLI automatically reuses prepared networks.
+
+### Validation at preparation
+
+`prepare_networks()` validates and normalizes every raw network before it reaches
+a calculation or plot:
+
+- Network names and node labels become strings. Missing labels, duplicate matrix
+  labels, and distinct labels that collide after conversion (such as `1` and
+  `"1"` within one network) are rejected.
+- Weights become finite `float64` values. Numeric strings are accepted. Invalid
+  text, missing values, infinity, complex numbers, and datetime values raise
+  `ValueError`, with the affected network's name in the message. An omitted
+  weight column or graph edge weight still defaults to `1.0`.
+- Adjacency matrices must be square. Labeled rows and columns must identify the
+  same nodes; rows are aligned to column order once. A default row index
+  (`RangeIndex(0, n)`) inherits column labels by position when the labels differ.
+  Arrays and nested lists use positional node labels (`"0"`, `"1"`, ...).
+- Duplicate edge weights are summed, and a sum that overflows is rejected.
+
+This validation is stricter than earlier versions, which silently replaced some
+invalid weights with zero. Calculations and plots now rely on the prepared data
+types instead of repeatedly converting labels and weights. Their existing output
+column formats are retained. Prepare the raw inputs again after correcting or
+editing them.

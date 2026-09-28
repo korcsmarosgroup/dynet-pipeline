@@ -211,6 +211,8 @@ def test_prepared_collection_skips_parsing_across_all_consumers(monkeypatch, nam
     monkeypatch.setattr(core, "_coerce_named_inputs", unexpected_parse)
     monkeypatch.setattr(core, "_prepare_network", unexpected_parse)
     monkeypatch.setattr(core, "_coerce_to_adjacency_matrix", unexpected_parse)
+    monkeypatch.setattr(core, "_normalize_labels", unexpected_parse)
+    monkeypatch.setattr(core, "_normalize_weights", unexpected_parse)
     conversions = []
     original = core._indata_to_edgelist
 
@@ -255,13 +257,16 @@ def test_prepared_collection_cannot_be_changed_to_contain_raw_inputs():
 
 
 @pytest.mark.parametrize("input_mode", ["--input-csv", "--edge-lists"])
-def test_cli_prepares_each_edge_list_once(tmp_path, monkeypatch, input_mode):
+@pytest.mark.parametrize("include_weights", [True, False])
+def test_cli_prepares_each_edge_list_once(tmp_path, monkeypatch, input_mode, include_weights):
     import sys
     import matplotlib.pyplot as plt
     from dynet_py import cli, core
 
     data = pd.DataFrame({"network": ["first", "second"], "from": ["A", "A"],
                          "to": ["B", "B"], "weight": [1., 2.]})
+    if not include_weights:
+        data = data.drop(columns="weight")
     sources = []
     if input_mode == "--input-csv":
         source = tmp_path / "networks.csv"

@@ -30,6 +30,11 @@ Single CSV with:
 - `to`
 - `weight` (optional; defaults to 1)
 
+Inputs use the same strict validation as `prepare_networks()`: invalid weights
+and missing network or node labels raise an error before results are written.
+Weights must be finite real numbers; numeric strings are accepted. Missing cells
+in a supplied weight column are errors, while omitting that column defaults to 1.
+
 ## Main Options
 
 - `--out-dir`: output directory (default `dynet_py_results`)

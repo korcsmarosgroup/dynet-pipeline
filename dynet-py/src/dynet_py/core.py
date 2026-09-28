@@ -26,27 +26,55 @@ def _coerce_named_inputs(
     input_list: Union[Mapping[str, object], Sequence[object]],
 ) -> Tuple[list[object], list[str]]:
     if isinstance(input_list, Mapping):
-        names = [str(k) for k in input_list.keys()]
+        names = _normalize_labels(input_list.keys(), "Network names")
         values = list(input_list.values())
         return values, names
 
     if isinstance(input_list, (str, bytes)):
         raise ValueError("Input must be a sequence/mapping of matrices, edge lists, or graphs.")
 
-    values = list(input_list)
+    try:
+        values = list(input_list)
+    except TypeError as exc:
+        raise ValueError("Input must be a sequence/mapping of matrices, edge lists, or graphs.") from exc
     names = [str(i + 1) for i in range(len(values))]
     return values, names
 
 
-def _set_rownames_to_colnames(mat: pd.DataFrame) -> pd.DataFrame:
-    out = mat.copy()
-    out.columns = [str(c) for c in out.columns]
-    out.index = out.columns
-    return out
+def _normalize_labels(labels: Iterable[object], description: str, *, unique: bool = True) -> list[str]:
+    values = pd.Index(list(labels), dtype=object, tupleize_cols=False)
+    if values.isna().any():
+        raise ValueError(f"{description} must not contain missing values.")
+    names = [str(value) for value in values]
+    # Repeated endpoints are valid, but distinct IDs such as 1 and "1" must not
+    # silently merge when converted to the canonical string representation.
+    distinct = values if unique else values.unique()
+    if len({str(value) for value in distinct}) != len(distinct):
+        raise ValueError(f"{description} must be unique after conversion to strings.")
+    return names
+
+
+def _normalize_weights(values: object) -> np.ndarray:
+    """Own finite, real float64 weights; never silently discard bad values."""
+    message = "Weights must be finite real numbers (numeric strings are accepted)."
+    try:
+        raw = np.asarray(values)
+        unsupported_objects = raw.dtype.kind == "O" and any(
+            isinstance(value, (complex, np.complexfloating, np.datetime64, np.timedelta64))
+            for value in raw.flat
+        )
+        if np.iscomplexobj(raw) or raw.dtype.kind in "mM" or unsupported_objects:
+            raise ValueError(message)
+        weights = raw.astype(np.float64, copy=True)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(message) from exc
+    if not np.isfinite(weights).all():
+        raise ValueError(message)
+    return weights
 
 
 class _PreparedNetwork:
-    """Owned normalized data with lazily cached alternate representations."""
+    """Owned string node labels and finite float64 weights with lazy caches."""
 
     def __init__(
         self, nodes: Iterable[str], edges: Optional[pd.DataFrame] = None,
@@ -71,13 +99,18 @@ class _PreparedNetwork:
 
 
 def _prepare_edgelist(el: pd.DataFrame) -> _PreparedNetwork:
-    work = el[["from", "to"]].astype(str).copy()
+    if not el.columns.is_unique:
+        raise ValueError("Edge-list column names must be unique.")
+    labels = _normalize_labels(list(el["from"]) + list(el["to"]), "Node labels", unique=False)
+    work = pd.DataFrame({"from": labels[:len(el)], "to": labels[len(el):]}, dtype=object)
     work["weight"] = (
-        pd.to_numeric(el["weight"], errors="coerce").fillna(0.0).astype(float)
+        _normalize_weights(el["weight"])
         if "weight" in el.columns else 1.0
     )
-    nodes = _ordered_unique(list(work["from"]) + list(work["to"]))
+    nodes = _ordered_unique(labels)
     grouped = work.groupby(["from", "to"], as_index=False)["weight"].sum()
+    if not np.isfinite(grouped["weight"].to_numpy()).all():
+        raise ValueError("Summed edge weights must be finite.")
     grouped = grouped[grouped["weight"] != 0].copy()
     # Match matrix row-major edge order without allocating a dense matrix.
     order = {node: i for i, node in enumerate(nodes)}
@@ -90,7 +123,7 @@ def _prepare_network(item: object) -> _PreparedNetwork:
         return item
     if isinstance(item, pd.DataFrame) and _is_edge_list_df(item):
         return _prepare_edgelist(item)
-    adj = _coerce_to_adjacency_matrix(item).copy()
+    adj = _coerce_to_adjacency_matrix(item)
     return _PreparedNetwork(adj.index, adjacency=adj)
 
 
@@ -104,9 +137,12 @@ class PreparedNetworks(Mapping[str, _PreparedNetwork]):
 
     def __init__(self, input_list: Union[Mapping[str, object], Sequence[object]]):
         items, names = _coerce_named_inputs(input_list)
-        if len(set(names)) != len(names):
-            raise ValueError("Network names must be unique after conversion to strings.")
-        self._networks = {name: _prepare_network(item) for name, item in zip(names, items)}
+        self._networks = {}
+        for name, item in zip(names, items):
+            try:
+                self._networks[name] = _prepare_network(item)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Network {name!r}: {exc}") from exc
 
     def __getitem__(self, name: str) -> _PreparedNetwork:
         return self._networks[name]
@@ -122,8 +158,11 @@ def prepare_networks(input_list: Union[Mapping[str, object], Sequence[object]]) 
     """Snapshot inputs once for reuse across analysis and plotting functions.
 
     Retains network names and isolated nodes, aggregates duplicate edges, and
-    builds adjacency matrices only when needed. An existing PreparedNetworks
-    collection is returned unchanged, without inspecting or normalizing its
+    normalizes node labels to strings and weights to finite float64 values.
+    Invalid weights, missing or ambiguous labels, and malformed matrices raise
+    ValueError here, before calculation or plotting. Builds adjacency matrices
+    only when needed. An existing PreparedNetworks collection is returned
+    unchanged, without inspecting or normalizing its
     networks again. Call this on the raw inputs again after editing them to create
     a new snapshot.
     """
@@ -132,40 +171,50 @@ def prepare_networks(input_list: Union[Mapping[str, object], Sequence[object]]) 
     return PreparedNetworks(input_list)
 
 
-def _edgelist_to_adjacency(el: pd.DataFrame) -> pd.DataFrame:
-    return _prepare_edgelist(el).adjacency()
-
-
 def _is_graph_like(item: object) -> bool:
     return hasattr(item, "nodes") and hasattr(item, "edges")
 
 
 def _graph_to_adjacency(graph: object) -> pd.DataFrame:
-    node_names = [str(n) for n in list(graph.nodes())]
-    if not node_names:
-        return pd.DataFrame()
+    raw_nodes = list(graph.nodes())
+    node_names = _normalize_labels(raw_nodes, "Node labels")
+    labels = dict(zip(raw_nodes, node_names))
+    edges = list(graph.edges(data=True))
+    weights = _normalize_weights([
+        data.get("weight", 1.0) if isinstance(data, Mapping) else 1.0
+        for _, _, data in edges
+    ])
     adj = pd.DataFrame(0.0, index=node_names, columns=node_names)
-    for u, v, data in graph.edges(data=True):
-        w = float(data.get("weight", 1.0)) if isinstance(data, dict) else 1.0
-        adj.loc[str(u), str(v)] = adj.loc[str(u), str(v)] + w
-        if not getattr(graph, "is_directed", lambda: True)():
-            adj.loc[str(v), str(u)] = adj.loc[str(v), str(u)] + w
+    directed = getattr(graph, "is_directed", lambda: True)()
+    for (u, v, _), weight in zip(edges, weights):
+        if u not in labels or v not in labels:
+            raise ValueError("Graph edge endpoints must be present in the graph's nodes.")
+        src, dst = labels[u], labels[v]
+        adj.loc[src, dst] += weight
+        if not directed:
+            adj.loc[dst, src] += weight
+    if not np.isfinite(adj.to_numpy()).all():
+        raise ValueError("Summed edge weights must be finite.")
     return adj
 
 
 def _coerce_to_adjacency_matrix(item: object) -> pd.DataFrame:
-    if isinstance(item, _PreparedNetwork):
-        return item.adjacency().copy()
     if isinstance(item, pd.DataFrame):
-        if _is_edge_list_df(item):
-            return _edgelist_to_adjacency(item)
         if item.shape[0] != item.shape[1]:
             raise ValueError("Adjacency matrix data frames must be square.")
-        out = _set_rownames_to_colnames(item)
-        return out.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        columns = _normalize_labels(item.columns, "Matrix column labels")
+        rows = _normalize_labels(item.index, "Matrix row labels")
+        if set(rows) != set(columns):
+            if isinstance(item.index, pd.RangeIndex) and item.index.equals(pd.RangeIndex(len(item))):
+                # An unlabeled row axis inherits the column labels by position.
+                rows = columns
+            else:
+                raise ValueError("Adjacency matrix row and column labels must name the same nodes.")
+        out = pd.DataFrame(_normalize_weights(item), index=rows, columns=columns)
+        return out.reindex(index=columns)
 
     if isinstance(item, (np.ndarray, list, tuple)):
-        arr = np.asarray(item, dtype=float)
+        arr = _normalize_weights(item)
         if arr.ndim != 2 or arr.shape[0] != arr.shape[1]:
             raise ValueError("Adjacency matrices must be 2D square matrices.")
         labels = [str(i) for i in range(arr.shape[0])]
@@ -184,34 +233,26 @@ def format_indata(
 
 
 def _expand_adjacency_matrices(adj_matrices: Sequence[pd.DataFrame]) -> list[pd.DataFrame]:
-    all_nodes = _ordered_unique(node for m in adj_matrices for node in m.index.astype(str))
-    expanded: list[pd.DataFrame] = []
-    for m in adj_matrices:
-        current = m.copy()
-        current.index = current.index.astype(str)
-        current.columns = current.columns.astype(str)
-        base = pd.DataFrame(0.0, index=all_nodes, columns=all_nodes)
-        base.loc[current.index, current.columns] = current.values
-        expanded.append(base)
-    return expanded
+    all_nodes = _ordered_unique(node for m in adj_matrices for node in m.index)
+    return [m.reindex(index=all_nodes, columns=all_nodes, fill_value=0.0) for m in adj_matrices]
 
 
 def _union_adjacency_matrices(matrices: Sequence[pd.DataFrame]) -> pd.DataFrame:
-    all_nodes = _ordered_unique(node for m in matrices for node in m.index.astype(str))
+    all_nodes = _ordered_unique(node for m in matrices for node in m.index)
     union = pd.DataFrame(0, index=all_nodes, columns=all_nodes, dtype=int)
     for adj in matrices:
-        nodes = list(adj.index.astype(str))
-        arr = adj.loc[nodes, nodes].to_numpy(dtype=float)
+        nodes = list(adj.index)
+        arr = adj.to_numpy()
         mask = arr > 0
         if np.any(mask):
-            sub = union.loc[nodes, nodes].to_numpy(dtype=int).copy()
+            sub = union.loc[nodes, nodes].to_numpy().copy()
             sub[mask] = 1
             union.loc[nodes, nodes] = sub
     return union
 
 
 def _indata_to_edgelist(ingraph: pd.DataFrame) -> pd.DataFrame:
-    arr = ingraph.to_numpy(dtype=float)
+    arr = ingraph.to_numpy()
     rows, cols = np.where(arr != 0)
     return pd.DataFrame(
         {
@@ -227,7 +268,7 @@ def _sum_matrices(matrices: Sequence[pd.DataFrame]) -> pd.DataFrame:
     counter = pd.DataFrame(0.0, index=matrices[0].index, columns=matrices[0].columns)
     for m in matrices:
         result = result + m
-        counter = counter + (m != 0).astype(float)
+        counter = counter + (m != 0)
     out = result / counter
     out = out.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     return out
@@ -238,11 +279,11 @@ def _square_matrices(matrices: Sequence[pd.DataFrame]) -> list[pd.DataFrame]:
 
 
 def _centroid_distance(matrices: Sequence[pd.DataFrame]) -> list[pd.Series]:
-    return [m.sum(axis=1) + m.sum(axis=0) - np.diag(m.to_numpy(dtype=float)) for m in matrices]
+    return [m.sum(axis=1) + m.sum(axis=0) - np.diag(m.to_numpy()) for m in matrices]
 
 
 def _structure_format(inmat: pd.DataFrame) -> pd.DataFrame:
-    arr = inmat.to_numpy(dtype=float)
+    arr = inmat.to_numpy()
     out = np.where(arr != 0, 1.0, arr)
     return pd.DataFrame(out, index=inmat.index, columns=inmat.columns)
 
@@ -274,7 +315,7 @@ def rewiring_analysis(
     standard_minus_centroid = [m - centroid for m in standardised_no_nan]
     squared = _square_matrices(standard_minus_centroid)
     cent_dist = _centroid_distance(squared)
-    cent_dist_bound = np.vstack([s.to_numpy(dtype=float) for s in cent_dist])
+    cent_dist_bound = np.vstack([s.to_numpy() for s in cent_dist])
     cent_final_dist = cent_dist_bound.sum(axis=0)
     rewiring = cent_final_dist / (len(cent_dist) - 1)
 
@@ -283,11 +324,11 @@ def rewiring_analysis(
     in_degree = unimatrix.sum(axis=0).to_numpy(dtype=float)
     self_loops = np.diag(unimatrix.to_numpy(dtype=float))
     degree = out_degree + in_degree - self_loops
-    degree_df = pd.DataFrame({"name": unimatrix.index.astype(str), "degree": degree})
+    degree_df = pd.DataFrame({"name": unimatrix.index, "degree": degree})
 
     rewiring_df = pd.DataFrame(
         {
-            "name": expanded[0].columns.astype(str),
+            "name": expanded[0].columns,
             "rewiring": rewiring,
         }
     )
@@ -311,8 +352,8 @@ def rewiring_plot(
                 union_edges.add(tuple(sorted((src, dst), key=node_order.__getitem__)))
     edges = sorted(union_edges, key=lambda edge: (node_order[edge[0]], node_order[edge[1]]))
     attr = output_dataframe.set_index("name")
-    rewiring = np.array([float(attr["rewiring"].get(n, 0.0)) for n in node_names], dtype=float)
-    degree = np.array([float(attr["degree"].get(n, 0.0)) for n in node_names], dtype=float)
+    rewiring = np.array([attr["rewiring"].get(n, 0.0) for n in node_names], dtype=float)
+    degree = np.array([attr["degree"].get(n, 0.0) for n in node_names], dtype=float)
     sizes = 300 + 1200 * (degree / degree.max() if degree.max() > 0 else degree + 1)
     n = max(1, len(node_names))
     angles = np.linspace(0, 2 * np.pi, num=n, endpoint=False)
@@ -347,6 +388,7 @@ def small_multiples_plot(
     mode: str = "focus_only",
 ):
     networks = prepare_networks(input_list)
+    focus_node = str(focus_node)
 
     edges_by_network: list[pd.DataFrame] = []
     if mode not in {"focus_only", "r_compat"}:
@@ -355,7 +397,7 @@ def small_multiples_plot(
     for name, network in networks.items():
         el = network.edges()[["from", "to"]].copy()
         if mode == "focus_only":
-            el = el[(el["from"].astype(str) == str(focus_node)) | (el["to"].astype(str) == str(focus_node))]
+            el = el[(el["from"] == focus_node) | (el["to"] == focus_node)]
         el = el.copy()
         el["id"] = name
         edges_by_network.append(el)
@@ -373,13 +415,13 @@ def small_multiples_plot(
         ax = axes_flat[idx]
         subset = all_edges[all_edges["id"] == network_id] if not all_edges.empty else pd.DataFrame()
         if subset.empty:
-            nodes = [str(focus_node)]
+            nodes = [focus_node]
             edges = []
         else:
             nodes = _ordered_unique(
-                [str(focus_node)] + subset["from"].astype(str).tolist() + subset["to"].astype(str).tolist()
+                [focus_node] + subset["from"].tolist() + subset["to"].tolist()
             )
-            edges = list(subset[["from", "to"]].astype(str).itertuples(index=False, name=None))
+            edges = list(subset[["from", "to"]].itertuples(index=False, name=None))
 
         m = max(1, len(nodes))
         angles = np.linspace(0, 2 * np.pi, num=m, endpoint=False)
@@ -393,11 +435,11 @@ def small_multiples_plot(
                 xytext=(x1, y1),
                 arrowprops=dict(arrowstyle="->", color="gray", alpha=0.4, lw=1.0),
             )
-        colors = ["#d62728" if node == str(focus_node) else "#1f77b4" for node in nodes]
+        colors = ["#d62728" if node == focus_node else "#1f77b4" for node in nodes]
         ax.scatter([pos[nm][0] for nm in nodes], [pos[nm][1] for nm in nodes], c=colors, s=400, zorder=2)
         for nm in nodes:
             ax.text(pos[nm][0], pos[nm][1], nm, fontsize=9, fontweight="bold", ha="center", va="center", zorder=3)
-        ax.set_title(str(network_id))
+        ax.set_title(network_id)
         ax.set_axis_off()
         ax.set_aspect("equal")
 
@@ -434,7 +476,7 @@ def compare_targeting(
     targeting_frames: list[pd.DataFrame] = []
     for i, net in enumerate(formatted.values(), start=1):
         in_targeting = net.edges().groupby("to")["weight"].sum().reindex(net.nodes, fill_value=0.0)
-        frame = pd.DataFrame({"name": in_targeting.index.astype(str), "targeting": in_targeting.to_numpy(dtype=float)})
+        frame = pd.DataFrame({"name": in_targeting.index, "targeting": in_targeting.to_numpy()})
         frame["network_id"] = i
         targeting_frames.append(frame[["name", "targeting", "network_id"]])
 
@@ -464,6 +506,7 @@ def compare_targeting(
         )
         df_compare = df_i.merge(df_j, on="name", how="inner")
         df_compare["compared_networks"] = f"{i}_vs_{j}"
+        # Preserve the public output schema; input weights are already numeric.
         df_compare["targetingNet1"] = df_compare["targeting_i"].astype(str)
         df_compare["targetingNet2"] = df_compare["targeting_j"].astype(str)
         df_compare["deltaTargeting"] = (df_compare["targeting_i"] - df_compare["targeting_j"]).abs()
