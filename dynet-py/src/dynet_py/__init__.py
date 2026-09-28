@@ -9,6 +9,7 @@ from .core import (
     dynet_main,
     dynet_plot,
     format_indata,
+    prepare_networks,
     package_data,
     package_data_remap,
     package_data_rename,
@@ -23,6 +24,7 @@ except PackageNotFoundError:
 __all__ = [
     "__version__",
     "format_indata",
+    "prepare_networks",
     "rewiring_analysis",
     "rewiring_plot",
     "small_multiples_plot",

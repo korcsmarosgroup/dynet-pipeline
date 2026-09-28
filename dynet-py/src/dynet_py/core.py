@@ -45,26 +45,70 @@ def _set_rownames_to_colnames(mat: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _edgelist_to_adjacency(el: pd.DataFrame) -> pd.DataFrame:
-    if not {"from", "to"}.issubset(el.columns):
-        raise ValueError("Edge list input must contain 'from' and 'to' columns.")
+class _PreparedNetwork:
+    """Owned normalized data with lazily cached alternate representations."""
 
-    if "weight" not in el.columns:
-        work = el.copy()
-        work["weight"] = 1.0
-    else:
-        work = el.copy()
+    def __init__(
+        self, nodes: Iterable[str], edges: Optional[pd.DataFrame] = None,
+        adjacency: Optional[pd.DataFrame] = None,
+    ):
+        self.nodes = list(nodes)
+        self._edges = edges
+        self._adjacency = adjacency
 
-    work["from"] = work["from"].astype(str)
-    work["to"] = work["to"].astype(str)
-    work["weight"] = pd.to_numeric(work["weight"], errors="coerce").fillna(0.0)
+    def edges(self) -> pd.DataFrame:
+        if self._edges is None:
+            self._edges = _indata_to_edgelist(self._adjacency)
+        return self._edges
 
+    def adjacency(self) -> pd.DataFrame:
+        if self._adjacency is None:
+            adj = pd.DataFrame(0.0, index=self.nodes, columns=self.nodes)
+            for src, dst, weight in self._edges.itertuples(index=False, name=None):
+                adj.loc[src, dst] = weight
+            self._adjacency = adj
+        return self._adjacency
+
+
+def _prepare_edgelist(el: pd.DataFrame) -> _PreparedNetwork:
+    work = el[["from", "to"]].astype(str).copy()
+    work["weight"] = (
+        pd.to_numeric(el["weight"], errors="coerce").fillna(0.0).astype(float)
+        if "weight" in el.columns else 1.0
+    )
     nodes = _ordered_unique(list(work["from"]) + list(work["to"]))
-    adj = pd.DataFrame(0.0, index=nodes, columns=nodes)
     grouped = work.groupby(["from", "to"], as_index=False)["weight"].sum()
-    for _, row in grouped.iterrows():
-        adj.loc[row["from"], row["to"]] = float(row["weight"])
-    return adj
+    grouped = grouped[grouped["weight"] != 0].copy()
+    # Match matrix row-major edge order without allocating a dense matrix.
+    order = {node: i for i, node in enumerate(nodes)}
+    grouped = grouped.sort_values(["from", "to"], key=lambda col: col.map(order)).reset_index(drop=True)
+    return _PreparedNetwork(nodes, edges=grouped)
+
+
+def _prepare_network(item: object) -> _PreparedNetwork:
+    if isinstance(item, _PreparedNetwork):
+        return item
+    if isinstance(item, pd.DataFrame) and _is_edge_list_df(item):
+        return _prepare_edgelist(item)
+    adj = _coerce_to_adjacency_matrix(item).copy()
+    return _PreparedNetwork(adj.index, adjacency=adj)
+
+
+def prepare_networks(input_list: Union[Mapping[str, object], Sequence[object]]) -> dict[str, _PreparedNetwork]:
+    """Snapshot inputs once for reuse across analysis and plotting functions.
+
+    Retains network names and isolated nodes, aggregates duplicate edges, and
+    builds adjacency matrices only when needed. Treat returned values as opaque;
+    call this again after changing the original inputs to create a new snapshot.
+    """
+    items, names = _coerce_named_inputs(input_list)
+    if len(set(names)) != len(names):
+        raise ValueError("Network names must be unique after conversion to strings.")
+    return {name: _prepare_network(item) for name, item in zip(names, items)}
+
+
+def _edgelist_to_adjacency(el: pd.DataFrame) -> pd.DataFrame:
+    return _prepare_edgelist(el).adjacency()
 
 
 def _is_graph_like(item: object) -> bool:
@@ -85,6 +129,8 @@ def _graph_to_adjacency(graph: object) -> pd.DataFrame:
 
 
 def _coerce_to_adjacency_matrix(item: object) -> pd.DataFrame:
+    if isinstance(item, _PreparedNetwork):
+        return item.adjacency().copy()
     if isinstance(item, pd.DataFrame):
         if _is_edge_list_df(item):
             return _edgelist_to_adjacency(item)
@@ -181,7 +227,7 @@ def rewiring_analysis(
     matrix_list: Union[Mapping[str, object], Sequence[object]],
     structure_only: bool = False,
 ) -> pd.DataFrame:
-    matrix_list_fmt = format_indata(matrix_list)
+    matrix_list_fmt = [net.adjacency() for net in prepare_networks(matrix_list).values()]
     if len(matrix_list_fmt) < 2:
         raise ValueError("rewiring_analysis requires at least two input networks.")
 
@@ -231,26 +277,22 @@ def rewiring_plot(
     output_dataframe: pd.DataFrame,
     structure_only: bool = False,
 ):
-    matrix_list_fmt = format_indata(matrix_list)
-    matrix_list_str = [_structure_format(m) for m in matrix_list_fmt] if structure_only else matrix_list_fmt
-    unimatrix = _union_adjacency_matrices(matrix_list_str)
-
+    networks = prepare_networks(matrix_list)
+    node_names = _ordered_unique(node for net in networks.values() for node in net.nodes)
+    node_order = {node: i for i, node in enumerate(node_names)}
+    union_edges = set()
+    for net in networks.values():
+        for src, dst, weight in net.edges().itertuples(index=False, name=None):
+            if structure_only or weight > 0:
+                union_edges.add(tuple(sorted((src, dst), key=node_order.__getitem__)))
+    edges = sorted(union_edges, key=lambda edge: (node_order[edge[0]], node_order[edge[1]]))
     attr = output_dataframe.set_index("name")
-    node_names = list(unimatrix.index.astype(str))
     rewiring = np.array([float(attr["rewiring"].get(n, 0.0)) for n in node_names], dtype=float)
     degree = np.array([float(attr["degree"].get(n, 0.0)) for n in node_names], dtype=float)
     sizes = 300 + 1200 * (degree / degree.max() if degree.max() > 0 else degree + 1)
     n = max(1, len(node_names))
     angles = np.linspace(0, 2 * np.pi, num=n, endpoint=False)
     pos = {node_names[i]: (np.cos(angles[i]), np.sin(angles[i])) for i in range(n)}
-    edges: list[tuple[str, str]] = []
-    for i, src in enumerate(node_names):
-        for j, dst in enumerate(node_names):
-            if j < i:
-                continue
-            if unimatrix.iloc[i, j] != 0 or unimatrix.iloc[j, i] != 0:
-                edges.append((src, dst))
-
     fig, ax = plt.subplots(figsize=(9, 7))
     for src, dst in edges:
         x1, y1 = pos[src]
@@ -281,14 +323,14 @@ def small_multiples_plot(
     mode: str = "focus_only",
 ):
     items, names = _coerce_named_inputs(input_list)
-    matrices = [_coerce_to_adjacency_matrix(item) for item in items]
+    networks = [_prepare_network(item) for item in items]
 
     edges_by_network: list[pd.DataFrame] = []
     if mode not in {"focus_only", "r_compat"}:
         raise ValueError("mode must be 'focus_only' or 'r_compat'")
 
-    for matrix, name in zip(matrices, names):
-        el = _indata_to_edgelist(matrix)[["from", "to"]].drop_duplicates()
+    for network, name in zip(networks, names):
+        el = network.edges()[["from", "to"]].copy()
         if mode == "focus_only":
             el = el[(el["from"].astype(str) == str(focus_node)) | (el["to"].astype(str) == str(focus_node))]
         el = el.copy()
@@ -343,43 +385,32 @@ def small_multiples_plot(
     return fig
 
 
-def _jaccard_index(adj1: pd.DataFrame, adj2: pd.DataFrame) -> float:
-    a1 = adj1.to_numpy(dtype=float)
-    a2 = adj2.to_numpy(dtype=float)
-    set1 = set(map(tuple, np.argwhere(a1 != 0)))
-    set2 = set(map(tuple, np.argwhere(a2 != 0)))
-    union = set1 | set2
-    intersection = set1 & set2
-    if not union:
-        return 1.0
-    return len(intersection) / len(union)
-
-
 def calculate_jaccard_indices(
     networks: Union[Mapping[str, object], Sequence[object]],
 ) -> pd.DataFrame:
-    matrices, names = _coerce_named_inputs(networks)
-    formatted = [_coerce_to_adjacency_matrix(item) for item in matrices]
-    n = len(formatted)
-    network_names = names if names else [f"Network_{i}" for i in range(1, n + 1)]
-
+    prepared = prepare_networks(networks)
+    names = list(prepared)
+    edge_sets = [set(net.edges()[["from", "to"]].itertuples(index=False, name=None))
+                 for net in prepared.values()]
+    n = len(edge_sets)
     jaccard_matrix = np.zeros((n, n), dtype=float)
     for i in range(n):
         for j in range(i, n):
-            val = _jaccard_index(formatted[i], formatted[j])
+            union = edge_sets[i] | edge_sets[j]
+            val = len(edge_sets[i] & edge_sets[j]) / len(union) if union else 1.0
             jaccard_matrix[i, j] = val
             jaccard_matrix[j, i] = val
-    return pd.DataFrame(jaccard_matrix, index=network_names, columns=network_names)
+    return pd.DataFrame(jaccard_matrix, index=names, columns=names)
 
 
 def compare_targeting(
     input_list: Union[Mapping[str, object], Sequence[object]],
 ) -> pd.DataFrame:
-    formatted = format_indata(input_list)
+    formatted = prepare_networks(input_list)
 
     targeting_frames: list[pd.DataFrame] = []
-    for i, adj in enumerate(formatted, start=1):
-        in_targeting = adj.sum(axis=0)
+    for i, net in enumerate(formatted.values(), start=1):
+        in_targeting = net.edges().groupby("to")["weight"].sum().reindex(net.nodes, fill_value=0.0)
         frame = pd.DataFrame({"name": in_targeting.index.astype(str), "targeting": in_targeting.to_numpy(dtype=float)})
         frame["network_id"] = i
         targeting_frames.append(frame[["name", "targeting", "network_id"]])

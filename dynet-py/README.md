@@ -146,3 +146,32 @@ packed = package_data(raw, source="src", target="dst", condition="cond", weight=
 out = dynet_main(packed)
 fig = dynet_plot(out, what="edges")
 ```
+
+## Reuse prepared networks
+
+When running several analyses or plots on the same inputs, prepare them once:
+
+```python
+from dynet_py import (
+    prepare_networks, rewiring_analysis, compare_targeting,
+    calculate_jaccard_indices, rewiring_plot, small_multiples_plot,
+)
+
+networks = prepare_networks({"net1": el1, "net2": el2})
+res = rewiring_analysis(networks)
+targeting = compare_targeting(networks)
+jaccard = calculate_jaccard_indices(networks)
+fig = rewiring_plot(networks, res)
+small_fig = small_multiples_plot(networks, focus_node="A")
+```
+
+Prepared inputs are snapshots: prepare them again after editing the original
+networks. Network names and isolated nodes are retained. Duplicate directed edges
+are summed; zero-weight edges (including duplicates that cancel) are absent from
+structural comparisons. Jaccard compares labeled directed edges, so node ordering
+and different node sets are handled correctly.
+
+For edge-list inputs, targeting, Jaccard, and plotting operate on normalized edges
+without allocating dense adjacency matrices. Rewiring builds and caches matrices
+when needed. Existing calls with raw inputs still work, and `format_indata` still
+returns adjacency matrices. The CLI automatically reuses prepared networks.

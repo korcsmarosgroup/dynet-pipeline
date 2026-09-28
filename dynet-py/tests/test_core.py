@@ -97,3 +97,120 @@ def test_plot_functions_return_figures():
     fig2 = small_multiples_plot(inputs, "B")
     assert fig1 is not None
     assert fig2 is not None
+
+
+def test_jaccard_compares_labels_and_ignores_matrix_order():
+    a = pd.DataFrame({"from": ["A"], "to": ["B"]})
+    b = pd.DataFrame({"from": ["A"], "to": ["C"]})
+    jac = calculate_jaccard_indices({"ab": a, "ac": b})
+    assert jac.loc["ab", "ac"] == 0.0
+
+    matrix = pd.DataFrame([[0., 2., 0.], [0., 0., 3.], [0., 0., 0.]],
+                          index=list("ABC"), columns=list("ABC"))
+    reordered = matrix.loc[list("CAB"), list("CAB")]
+    jac = calculate_jaccard_indices([matrix, reordered])
+    assert jac.iloc[0, 1] == 1.0
+
+
+def test_edge_operations_do_not_build_dense_matrices(monkeypatch):
+    import matplotlib.pyplot as plt
+    from dynet_py import prepare_networks
+    from dynet_py.core import _PreparedNetwork
+
+    def unexpected_matrix(self):
+        raise AssertionError("Edge operations must not allocate adjacency matrices")
+
+    monkeypatch.setattr(_PreparedNetwork, "adjacency", unexpected_matrix)
+    # Duplicate cancellation must remove the edge but retain its nodes.
+    el = pd.DataFrame({"from": ["A", "A", "B", "C"],
+                       "to": ["B", "B", "C", "C"], "weight": [2., -2., -3., 4.]})
+    prepared = prepare_networks({"first": el, "second": el})
+    assert calculate_jaccard_indices(prepared).iloc[0, 1] == 1.0
+    targeting = compare_targeting(prepared).set_index("name")
+    assert targeting.loc["A", "targetingNet1"] == "0.0"
+    assert targeting.loc["B", "targetingNet1"] == "0.0"
+    assert targeting.loc["C", "targetingNet1"] == "1.0"
+    fig = small_multiples_plot(prepared, "C")
+    assert [ax.get_title() for ax in fig.axes] == ["first", "second"]
+    plt.close(fig)
+    scores = pd.DataFrame({"name": list("ABC"), "rewiring": [0., 1., 2.], "degree": [0., 1., 1.]})
+    fig = rewiring_plot(prepared, scores)
+    assert len(fig.axes[0].lines) == 1  # Positive self-loop only.
+    plt.close(fig)
+    fig = rewiring_plot(prepared, scores, structure_only=True)
+    assert len(fig.axes[0].lines) == 2  # Negative edge participates in structure.
+    plt.close(fig)
+
+
+def test_prepared_inputs_are_reusable_snapshots_with_isolated_nodes():
+    import matplotlib.pyplot as plt
+    from dynet_py import format_indata, prepare_networks
+
+    matrix = pd.DataFrame([[0., 2., 0.], [0., 0., 0.], [0., 0., 0.]],
+                          index=list("ABC"), columns=list("ABC"))
+    edge_list = pd.DataFrame({"from": ["A", "A", "C"], "to": ["B", "B", "C"],
+                              "weight": [1., 1., 0.]})
+    prepared = prepare_networks({"matrix": matrix, "edges": edge_list})
+    baseline = rewiring_analysis(prepared)
+    assert baseline["rewiring"].eq(0).all()
+    assert baseline.set_index("name")["degree"].to_dict() == {"A": 1, "B": 1, "C": 0}
+    matrix.iloc[0, 1] = 99.
+    edge_list.loc[0, "weight"] = 99.
+    exported = format_indata(prepared)
+    pd.testing.assert_frame_equal(exported[0], exported[1].loc[list("ABC"), list("ABC")])
+    exported[0].iloc[0, 1] = 123.
+    for structural in (True, False):
+        rewiring_analysis(prepared, structure_only=structural)
+        fig = rewiring_plot(prepared, baseline, structure_only=structural)
+        plt.close(fig)
+    pd.testing.assert_frame_equal(rewiring_analysis(prepared), baseline)
+    assert "C" in compare_targeting(prepared)["name"].tolist()
+    assert format_indata(prepared)[0].loc["A", "B"] == 2.
+
+
+def test_jaccard_duplicate_cancellation_and_empty_networks():
+    cancelled = pd.DataFrame({"from": ["A", "A"], "to": ["B", "B"], "weight": [1., -1.]})
+    empty = pd.DataFrame(columns=["from", "to"])
+    present = pd.DataFrame({"from": ["A"], "to": ["B"], "weight": [-1.]})
+    jac = calculate_jaccard_indices([cancelled, empty, present])
+    assert jac.iloc[0, 1] == 1.
+    assert jac.iloc[0, 2] == 0.
+
+
+def test_prepared_numpy_input_is_a_snapshot():
+    import numpy as np
+    from dynet_py import format_indata, prepare_networks
+
+    original = np.array([[0., 2.], [0., 0.]])
+    prepared = prepare_networks([original])
+    original[0, 1] = 99.
+    assert format_indata(prepared)[0].iloc[0, 1] == 2.
+
+
+def test_cli_prepares_each_edge_list_once(tmp_path, monkeypatch):
+    import sys
+    import matplotlib.pyplot as plt
+    from dynet_py import cli, core
+
+    source = tmp_path / "networks.csv"
+    pd.DataFrame({"network": ["first", "second"], "from": ["A", "A"],
+                  "to": ["B", "B"], "weight": [1., 2.]}).to_csv(source, index=False)
+    destination = tmp_path / "results"
+    calls = []
+    original = core._prepare_edgelist
+
+    def prepare_once(frame):
+        calls.append(frame)
+        return original(frame)
+
+    monkeypatch.setattr(core, "_prepare_edgelist", prepare_once)
+    monkeypatch.setattr(sys, "argv", ["dynet-py", "--input-csv", str(source),
+                                     "--out-dir", str(destination)])
+    cli.main()
+    assert len(calls) == 2
+    assert {p.name for p in destination.iterdir()} == {
+        "dynet_py_output.csv", "compare_targeting.csv", "dynet_py_plot.png", "small_multiples_plot.png",
+    }
+    output = pd.read_csv(destination / "dynet_py_output.csv")
+    assert set(output["name"]) == {"A", "B"}
+    plt.close("all")

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .core import compare_targeting, rewiring_analysis, rewiring_plot, small_multiples_plot
+from .core import prepare_networks, compare_targeting, rewiring_analysis, rewiring_plot, small_multiples_plot
 
 
 def _parse_args() -> argparse.Namespace:
@@ -75,6 +75,8 @@ def main() -> None:
         if len(csv_paths) < 2:
             raise ValueError("At least two edge-list CSV files are required.")
         networks = {p.stem: _load_edge_list(p) for p in csv_paths}
+
+    networks = prepare_networks(networks)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
