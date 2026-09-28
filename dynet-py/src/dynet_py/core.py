@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from itertools import combinations
-from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple, Union
+from typing import Dict, Iterable, Iterator, Mapping, Optional, Sequence, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -94,17 +94,42 @@ def _prepare_network(item: object) -> _PreparedNetwork:
     return _PreparedNetwork(adj.index, adjacency=adj)
 
 
-def prepare_networks(input_list: Union[Mapping[str, object], Sequence[object]]) -> dict[str, _PreparedNetwork]:
+class PreparedNetworks(Mapping[str, _PreparedNetwork]):
+    """Reusable network inputs with cached edge lists and adjacency matrices.
+
+    Usually created with :func:`prepare_networks`. Network names can be inspected
+    like a mapping, but entries cannot be replaced or removed. Treat the values
+    as opaque and pass this collection directly to analysis and plotting functions.
+    """
+
+    def __init__(self, input_list: Union[Mapping[str, object], Sequence[object]]):
+        items, names = _coerce_named_inputs(input_list)
+        if len(set(names)) != len(names):
+            raise ValueError("Network names must be unique after conversion to strings.")
+        self._networks = {name: _prepare_network(item) for name, item in zip(names, items)}
+
+    def __getitem__(self, name: str) -> _PreparedNetwork:
+        return self._networks[name]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._networks)
+
+    def __len__(self) -> int:
+        return len(self._networks)
+
+
+def prepare_networks(input_list: Union[Mapping[str, object], Sequence[object]]) -> PreparedNetworks:
     """Snapshot inputs once for reuse across analysis and plotting functions.
 
     Retains network names and isolated nodes, aggregates duplicate edges, and
-    builds adjacency matrices only when needed. Treat returned values as opaque;
-    call this again after changing the original inputs to create a new snapshot.
+    builds adjacency matrices only when needed. An existing PreparedNetworks
+    collection is returned unchanged, without inspecting or normalizing its
+    networks again. Call this on the raw inputs again after editing them to create
+    a new snapshot.
     """
-    items, names = _coerce_named_inputs(input_list)
-    if len(set(names)) != len(names):
-        raise ValueError("Network names must be unique after conversion to strings.")
-    return {name: _prepare_network(item) for name, item in zip(names, items)}
+    if isinstance(input_list, PreparedNetworks):
+        return input_list
+    return PreparedNetworks(input_list)
 
 
 def _edgelist_to_adjacency(el: pd.DataFrame) -> pd.DataFrame:
@@ -155,8 +180,7 @@ def _coerce_to_adjacency_matrix(item: object) -> pd.DataFrame:
 def format_indata(
     input_list: Union[Mapping[str, object], Sequence[object]],
 ) -> list[pd.DataFrame]:
-    items, _ = _coerce_named_inputs(input_list)
-    return [_coerce_to_adjacency_matrix(item) for item in items]
+    return [network.adjacency().copy() for network in prepare_networks(input_list).values()]
 
 
 def _expand_adjacency_matrices(adj_matrices: Sequence[pd.DataFrame]) -> list[pd.DataFrame]:
@@ -322,14 +346,13 @@ def small_multiples_plot(
     focus_node: str,
     mode: str = "focus_only",
 ):
-    items, names = _coerce_named_inputs(input_list)
-    networks = [_prepare_network(item) for item in items]
+    networks = prepare_networks(input_list)
 
     edges_by_network: list[pd.DataFrame] = []
     if mode not in {"focus_only", "r_compat"}:
         raise ValueError("mode must be 'focus_only' or 'r_compat'")
 
-    for network, name in zip(networks, names):
+    for name, network in networks.items():
         el = network.edges()[["from", "to"]].copy()
         if mode == "focus_only":
             el = el[(el["from"].astype(str) == str(focus_node)) | (el["to"].astype(str) == str(focus_node))]
@@ -338,7 +361,7 @@ def small_multiples_plot(
         edges_by_network.append(el)
 
     all_edges = pd.concat(edges_by_network, ignore_index=True) if edges_by_network else pd.DataFrame()
-    plot_ids = names
+    plot_ids = list(networks)
 
     n = max(1, len(plot_ids))
     ncols = min(3, n)

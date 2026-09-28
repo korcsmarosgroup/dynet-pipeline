@@ -4,7 +4,7 @@
 
 ```python
 import pandas as pd
-from dynet_py import rewiring_analysis, rewiring_plot, compare_targeting
+from dynet_py import prepare_networks, rewiring_analysis, rewiring_plot, compare_targeting
 
 net1 = pd.DataFrame(
     {"from": ["A", "A", "B"], "to": ["B", "C", "C"], "weight": [1.0, 2.0, 1.0]}
@@ -13,7 +13,7 @@ net2 = pd.DataFrame(
     {"from": ["A", "B", "C"], "to": ["C", "C", "B"], "weight": [2.0, 1.0, 1.0]}
 )
 
-networks = {"net1": net1, "net2": net2}
+networks = prepare_networks({"net1": net1, "net2": net2})
 rewiring = rewiring_analysis(networks)
 targeting = compare_targeting(networks)
 fig = rewiring_plot(networks, rewiring)

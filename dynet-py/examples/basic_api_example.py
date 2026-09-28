@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from dynet_py import compare_targeting, rewiring_analysis, rewiring_plot, small_multiples_plot
+from dynet_py import prepare_networks, compare_targeting, rewiring_analysis, rewiring_plot, small_multiples_plot
 
 
 def main() -> None:
@@ -27,7 +27,7 @@ def main() -> None:
         }
     )
 
-    networks = {"net1": net1, "net2": net2}
+    networks = prepare_networks({"net1": net1, "net2": net2})
 
     rewiring = rewiring_analysis(networks)
     targeting = compare_targeting(networks)

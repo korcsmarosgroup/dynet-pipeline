@@ -6,6 +6,7 @@ It installs the Python import package `dynet_py` and the CLI command `dynet-py`.
 
 It exposes the main API:
 
+- `prepare_networks`
 - `format_indata`
 - `rewiring_analysis`
 - `rewiring_plot`
@@ -81,13 +82,14 @@ mkdocs build --strict
 
 ```python
 import pandas as pd
-from dynet_py import rewiring_analysis, rewiring_plot
+from dynet_py import prepare_networks, rewiring_analysis, rewiring_plot
 
 el1 = pd.DataFrame({"from": ["A", "B"], "to": ["B", "C"], "weight": [1, 2]})
 el2 = pd.DataFrame({"from": ["A", "C"], "to": ["C", "B"], "weight": [2, 1]})
 
-res = rewiring_analysis({"net1": el1, "net2": el2})
-fig = rewiring_plot({"net1": el1, "net2": el2}, res)
+networks = prepare_networks({"net1": el1, "net2": el2})
+res = rewiring_analysis(networks)
+fig = rewiring_plot(networks, res)
 ```
 
 ## Example script
@@ -165,13 +167,22 @@ fig = rewiring_plot(networks, res)
 small_fig = small_multiples_plot(networks, focus_node="A")
 ```
 
-Prepared inputs are snapshots: prepare them again after editing the original
-networks. Network names and isolated nodes are retained. Duplicate directed edges
+`prepare_networks()` returns a reusable `PreparedNetworks` collection. Every
+calculation and plot in the example consumes this same collection; passing it to
+`prepare_networks()` again returns the identical object without rechecking each
+network or rebuilding the collection. Raw inputs remain accepted for convenience,
+but passing raw inputs separately to each function repeats preparation.
+
+Prepared inputs are snapshots: prepare the raw inputs again after editing the
+original networks. The collection supports reading names and values like a
+mapping, but entries cannot be added, replaced, or removed. Treat its values as
+opaque. Network names and isolated nodes are retained. Duplicate directed edges
 are summed; zero-weight edges (including duplicates that cancel) are absent from
 structural comparisons. Jaccard compares labeled directed edges, so node ordering
 and different node sets are handled correctly.
 
 For edge-list inputs, targeting, Jaccard, and plotting operate on normalized edges
 without allocating dense adjacency matrices. Rewiring builds and caches matrices
-when needed. Existing calls with raw inputs still work, and `format_indata` still
-returns adjacency matrices. The CLI automatically reuses prepared networks.
+when needed. `format_indata` uses the same prepared collection and returns copies
+of its adjacency matrices, so editing an exported matrix does not alter the cache.
+The CLI automatically reuses prepared networks.

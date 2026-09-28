@@ -1,6 +1,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from .core import (
+    PreparedNetworks,
     calculate_jaccard_indices,
     compare_targeting,
     rewiring_analysis,
@@ -23,6 +24,7 @@ except PackageNotFoundError:
 
 __all__ = [
     "__version__",
+    "PreparedNetworks",
     "format_indata",
     "prepare_networks",
     "rewiring_analysis",

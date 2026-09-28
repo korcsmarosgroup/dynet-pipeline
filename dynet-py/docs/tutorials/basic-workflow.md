@@ -14,11 +14,12 @@ Your network tables must include:
 
 ```python
 import pandas as pd
-from dynet_py import rewiring_analysis
+from dynet_py import prepare_networks, rewiring_analysis
 
 net1 = pd.read_csv("net1.csv")
 net2 = pd.read_csv("net2.csv")
-result = rewiring_analysis({"net1": net1, "net2": net2})
+networks = prepare_networks({"net1": net1, "net2": net2})
+result = rewiring_analysis(networks)
 print(result.head())
 ```
 
@@ -27,7 +28,7 @@ print(result.head())
 ```python
 from dynet_py import compare_targeting
 
-targeting = compare_targeting({"net1": net1, "net2": net2})
+targeting = compare_targeting(networks)
 print(targeting.head())
 ```
 
@@ -36,10 +37,10 @@ print(targeting.head())
 ```python
 from dynet_py import rewiring_plot, small_multiples_plot
 
-fig1 = rewiring_plot({"net1": net1, "net2": net2}, result)
+fig1 = rewiring_plot(networks, result)
 fig1.savefig("dynet_py_plot.png", dpi=150, bbox_inches="tight")
 
-fig2 = small_multiples_plot({"net1": net1, "net2": net2}, focus_node="A")
+fig2 = small_multiples_plot(networks, focus_node="A")
 fig2.savefig("small_multiples_plot.png", dpi=150, bbox_inches="tight")
 ```
 

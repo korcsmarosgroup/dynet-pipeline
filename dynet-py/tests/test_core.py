@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from dynet_py import (
     calculate_jaccard_indices,
@@ -187,27 +188,111 @@ def test_prepared_numpy_input_is_a_snapshot():
     assert format_indata(prepared)[0].iloc[0, 1] == 2.
 
 
-def test_cli_prepares_each_edge_list_once(tmp_path, monkeypatch):
+@pytest.mark.parametrize("named", [True, False])
+def test_prepared_collection_skips_parsing_across_all_consumers(monkeypatch, named):
+    import matplotlib.pyplot as plt
+    from dynet_py import PreparedNetworks, core, format_indata, prepare_networks
+
+    matrix = pd.DataFrame([[0., 2., 0.], [0., 0., 3.], [0., 0., 0.]],
+                          index=list("ABC"), columns=list("ABC"))
+    edges = pd.DataFrame({"from": ["A", "C"], "to": ["B", "B"], "weight": [4., 1.]})
+    inputs = {"matrix": matrix, "edges": edges} if named else [matrix, edges]
+    expected_rewiring = {mode: rewiring_analysis(inputs, structure_only=mode) for mode in (False, True)}
+    expected_targeting = compare_targeting(inputs)
+    expected_jaccard = calculate_jaccard_indices(inputs)
+    expected_matrices = format_indata(inputs)
+    prepared = prepare_networks(inputs)
+    assert isinstance(prepared, PreparedNetworks)
+    assert list(prepared) == (["matrix", "edges"] if named else ["1", "2"])
+
+    def unexpected_parse(*args, **kwargs):
+        raise AssertionError("Prepared collections must bypass input parsing")
+
+    monkeypatch.setattr(core, "_coerce_named_inputs", unexpected_parse)
+    monkeypatch.setattr(core, "_prepare_network", unexpected_parse)
+    monkeypatch.setattr(core, "_coerce_to_adjacency_matrix", unexpected_parse)
+    conversions = []
+    original = core._indata_to_edgelist
+
+    def record_conversion(adjacency):
+        conversions.append(adjacency)
+        return original(adjacency)
+
+    monkeypatch.setattr(core, "_indata_to_edgelist", record_conversion)
+    assert prepare_networks(prepared) is prepared
+    cached_matrices = None
+    for structural in (False, True):
+        pd.testing.assert_frame_equal(compare_targeting(prepared), expected_targeting)
+        pd.testing.assert_frame_equal(calculate_jaccard_indices(prepared), expected_jaccard)
+        result = rewiring_analysis(prepared, structure_only=structural)
+        pd.testing.assert_frame_equal(result, expected_rewiring[structural])
+        fig = rewiring_plot(prepared, result, structure_only=structural)
+        plt.close(fig)
+        for mode in ("focus_only", "r_compat"):
+            fig = small_multiples_plot(prepared, "B", mode=mode)
+            assert [ax.get_title() for ax in fig.axes] == list(prepared)
+            plt.close(fig)
+        for actual, expected in zip(format_indata(prepared), expected_matrices):
+            pd.testing.assert_frame_equal(actual, expected)
+        matrices = [network.adjacency() for network in prepared.values()]
+        if cached_matrices is not None:
+            assert all(current is cached for current, cached in zip(matrices, cached_matrices))
+        cached_matrices = matrices
+    assert len(conversions) == 1  # Only the matrix input needs an edge-list conversion.
+
+
+def test_prepared_collection_cannot_be_changed_to_contain_raw_inputs():
+    from dynet_py import prepare_networks
+
+    edges = pd.DataFrame({"from": ["A"], "to": ["B"]})
+    prepared = prepare_networks({"first": edges})
+    with pytest.raises(TypeError):
+        prepared["first"] = edges
+    with pytest.raises(TypeError):
+        del prepared["first"]
+    with pytest.raises(ValueError, match="Network names must be unique"):
+        prepare_networks({1: edges, "1": edges})
+
+
+@pytest.mark.parametrize("input_mode", ["--input-csv", "--edge-lists"])
+def test_cli_prepares_each_edge_list_once(tmp_path, monkeypatch, input_mode):
     import sys
     import matplotlib.pyplot as plt
     from dynet_py import cli, core
 
-    source = tmp_path / "networks.csv"
-    pd.DataFrame({"network": ["first", "second"], "from": ["A", "A"],
-                  "to": ["B", "B"], "weight": [1., 2.]}).to_csv(source, index=False)
+    data = pd.DataFrame({"network": ["first", "second"], "from": ["A", "A"],
+                         "to": ["B", "B"], "weight": [1., 2.]})
+    sources = []
+    if input_mode == "--input-csv":
+        source = tmp_path / "networks.csv"
+        data.to_csv(source, index=False)
+        sources.append(str(source))
+    else:
+        for name, frame in data.groupby("network", sort=False):
+            source = tmp_path / f"{name}.csv"
+            frame.drop(columns="network").to_csv(source, index=False)
+            sources.append(str(source))
     destination = tmp_path / "results"
     calls = []
     original = core._prepare_edgelist
+    input_calls = []
+    original_inputs = core._coerce_named_inputs
 
     def prepare_once(frame):
         calls.append(frame)
         return original(frame)
 
+    def parse_inputs_once(inputs):
+        input_calls.append(inputs)
+        return original_inputs(inputs)
+
     monkeypatch.setattr(core, "_prepare_edgelist", prepare_once)
-    monkeypatch.setattr(sys, "argv", ["dynet-py", "--input-csv", str(source),
+    monkeypatch.setattr(core, "_coerce_named_inputs", parse_inputs_once)
+    monkeypatch.setattr(sys, "argv", ["dynet-py", input_mode, *sources,
                                      "--out-dir", str(destination)])
     cli.main()
     assert len(calls) == 2
+    assert len(input_calls) == 1
     assert {p.name for p in destination.iterdir()} == {
         "dynet_py_output.csv", "compare_targeting.csv", "dynet_py_plot.png", "small_multiples_plot.png",
     }
