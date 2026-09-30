@@ -57,7 +57,8 @@ nested dictionaries, add `output="legacy"`.
 
 ## Install
 
-Use a virtual environment and install with the same interpreter you will run:
+Run these commands from the repository's `dynet-py` directory. Use a virtual
+environment and install with the same interpreter you will run:
 
 ```bash
 python3 -m venv .venv
@@ -161,7 +162,7 @@ Run rewiring analysis directly from CSV edge lists:
 dynet-py --edge-lists input_edges_t1.csv input_edges_t2.csv --out-dir results
 ```
 
-Or use this repo's bundled multi-network format:
+Or use a single CSV containing multiple networks:
 
 ```bash
 dynet-py --input-csv input_edges.csv --out-dir results
@@ -176,6 +177,7 @@ Expected input columns:
 For `--input-csv`, include `network` as well.
 
 Output files:
+
 - `dynet_py_output.csv`
 - `compare_targeting.csv`
 - `dynet_py_plot.png`
@@ -308,6 +310,7 @@ a calculation or plot:
 
 This validation is stricter than earlier versions, which silently replaced some
 invalid weights with zero. Calculations and plots now rely on the prepared data
-types instead of repeatedly converting labels and weights. Their existing output
-column formats are retained. Prepare the raw inputs again after correcting or
-editing them.
+types instead of repeatedly converting labels and weights. The standardized
+rewiring, targeting, and Jaccard output schemas are unchanged; condition-comparison
+tables follow the migration guidance above. Prepare the raw inputs again after
+correcting or editing them.
