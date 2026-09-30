@@ -128,7 +128,7 @@ def _prepare_network(item: object) -> _PreparedNetwork:
 
 
 class PreparedNetworks(Mapping[str, _PreparedNetwork]):
-    """Reusable network inputs with cached edge lists and adjacency matrices.
+    """Validated networks with edge lists and a lazily cached adjacency tensor.
 
     Usually created with :func:`prepare_networks`. Network names can be inspected
     like a mapping, but entries cannot be replaced or removed. Treat the values
@@ -143,6 +143,10 @@ class PreparedNetworks(Mapping[str, _PreparedNetwork]):
                 self._networks[name] = _prepare_network(item)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"Network {name!r}: {exc}") from exc
+        self._node_names = tuple(_ordered_unique(
+            node for net in self._networks.values() for node in net.nodes
+        ))
+        self._adjacency_tensor: Optional[np.ndarray] = None
 
     def __getitem__(self, name: str) -> _PreparedNetwork:
         return self._networks[name]
@@ -153,6 +157,36 @@ class PreparedNetworks(Mapping[str, _PreparedNetwork]):
     def __len__(self) -> int:
         return len(self._networks)
 
+    @property
+    def node_names(self) -> tuple[str, ...]:
+        """Node labels in the order of both node axes of the adjacency tensor."""
+        return self._node_names
+
+    def adjacency_tensor(self) -> np.ndarray:
+        """Return cached read-only float64 data shaped (networks, nodes, nodes).
+
+        Axis 0 follows this collection's iteration order; axes 1 (source) and 2
+        (target) follow ``node_names``. Nodes absent from a network have zero rows
+        and columns. Use ``.copy()`` if a writable array is needed.
+        """
+        if self._adjacency_tensor is None:
+            nodes = pd.Index(self.node_names)
+            tensor = np.zeros((len(self), len(nodes), len(nodes)), dtype=np.float64)
+            for i, network in enumerate(self.values()):
+                if network._adjacency is not None:
+                    positions = nodes.get_indexer(network.nodes)
+                    tensor[i][np.ix_(positions, positions)] = network._adjacency.to_numpy()
+                else:
+                    # Populate the common node axes directly from normalized
+                    # edges, without building intermediate per-network matrices.
+                    edges = network.edges()
+                    rows = nodes.get_indexer(edges["from"])
+                    columns = nodes.get_indexer(edges["to"])
+                    tensor[i, rows, columns] = edges["weight"].to_numpy()
+            tensor.setflags(write=False)
+            self._adjacency_tensor = tensor
+        return self._adjacency_tensor
+
 
 def prepare_networks(input_list: Union[Mapping[str, object], Sequence[object]]) -> PreparedNetworks:
     """Snapshot inputs once for reuse across analysis and plotting functions.
@@ -160,11 +194,10 @@ def prepare_networks(input_list: Union[Mapping[str, object], Sequence[object]]) 
     Retains network names and isolated nodes, aggregates duplicate edges, and
     normalizes node labels to strings and weights to finite float64 values.
     Invalid weights, missing or ambiguous labels, and malformed matrices raise
-    ValueError here, before calculation or plotting. Builds adjacency matrices
-    only when needed. An existing PreparedNetworks collection is returned
-    unchanged, without inspecting or normalizing its
-    networks again. Call this on the raw inputs again after editing them to create
-    a new snapshot.
+    ValueError here, before calculation or plotting. Builds the aligned adjacency
+    tensor only when needed. An existing PreparedNetworks collection is returned
+    unchanged, without inspecting or normalizing its networks again. Call this on
+    the raw inputs again after editing them to create a new snapshot.
     """
     if isinstance(input_list, PreparedNetworks):
         return input_list
@@ -232,25 +265,6 @@ def format_indata(
     return [network.adjacency().copy() for network in prepare_networks(input_list).values()]
 
 
-def _expand_adjacency_matrices(adj_matrices: Sequence[pd.DataFrame]) -> list[pd.DataFrame]:
-    all_nodes = _ordered_unique(node for m in adj_matrices for node in m.index)
-    return [m.reindex(index=all_nodes, columns=all_nodes, fill_value=0.0) for m in adj_matrices]
-
-
-def _union_adjacency_matrices(matrices: Sequence[pd.DataFrame]) -> pd.DataFrame:
-    all_nodes = _ordered_unique(node for m in matrices for node in m.index)
-    union = pd.DataFrame(0, index=all_nodes, columns=all_nodes, dtype=int)
-    for adj in matrices:
-        nodes = list(adj.index)
-        arr = adj.to_numpy()
-        mask = arr > 0
-        if np.any(mask):
-            sub = union.loc[nodes, nodes].to_numpy().copy()
-            sub[mask] = 1
-            union.loc[nodes, nodes] = sub
-    return union
-
-
 def _indata_to_edgelist(ingraph: pd.DataFrame) -> pd.DataFrame:
     arr = ingraph.to_numpy()
     rows, cols = np.where(arr != 0)
@@ -263,78 +277,45 @@ def _indata_to_edgelist(ingraph: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _sum_matrices(matrices: Sequence[pd.DataFrame]) -> pd.DataFrame:
-    result = pd.DataFrame(0.0, index=matrices[0].index, columns=matrices[0].columns)
-    counter = pd.DataFrame(0.0, index=matrices[0].index, columns=matrices[0].columns)
-    for m in matrices:
-        result = result + m
-        counter = counter + (m != 0)
-    out = result / counter
-    out = out.replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    return out
-
-
-def _square_matrices(matrices: Sequence[pd.DataFrame]) -> list[pd.DataFrame]:
-    return [m**2 for m in matrices]
-
-
-def _centroid_distance(matrices: Sequence[pd.DataFrame]) -> list[pd.Series]:
-    return [m.sum(axis=1) + m.sum(axis=0) - np.diag(m.to_numpy()) for m in matrices]
-
-
-def _structure_format(inmat: pd.DataFrame) -> pd.DataFrame:
-    arr = inmat.to_numpy()
-    out = np.where(arr != 0, 1.0, arr)
-    return pd.DataFrame(out, index=inmat.index, columns=inmat.columns)
-
-
 def rewiring_analysis(
     matrix_list: Union[Mapping[str, object], Sequence[object]],
     structure_only: bool = False,
 ) -> pd.DataFrame:
-    matrix_list_fmt = [net.adjacency() for net in prepare_networks(matrix_list).values()]
-    if len(matrix_list_fmt) < 2:
+    networks = prepare_networks(matrix_list)
+    if len(networks) < 2:
         raise ValueError("rewiring_analysis requires at least two input networks.")
 
-    if structure_only:
-        matrix_list_str = [_structure_format(m) for m in matrix_list_fmt]
-    else:
-        matrix_list_str = matrix_list_fmt
+    tensor = networks.adjacency_tensor()
+    matrices = tensor != 0 if structure_only else tensor
+    counts = np.count_nonzero(matrices, axis=0)
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        non_zero_mean = np.divide(
+            matrices.sum(axis=0), counts,
+            out=np.zeros(matrices.shape[1:], dtype=np.float64), where=counts != 0,
+        )
+        non_zero_mean[~np.isfinite(non_zero_mean)] = 0.0
+        deviations = matrices / non_zero_mean
+        deviations[np.isnan(deviations)] = 0.0
+        deviations -= deviations.mean(axis=0)
+        np.square(deviations, out=deviations)
 
-    expanded = _expand_adjacency_matrices(matrix_list_str)
-    non_zero_mean = _sum_matrices(expanded)
+        # Match the established skip-NaN row/column sums, but preserve undefined
+        # diagonal contributions (possible when signed edge weights cancel).
+        diagonal = np.diagonal(deviations, axis1=1, axis2=2).copy()
+        deviations[np.isnan(deviations)] = 0.0
+        distances = deviations.sum(axis=1) + deviations.sum(axis=2) - diagonal
+        rewiring = distances.sum(axis=0) / (len(networks) - 1)
 
-    standardised = [m / non_zero_mean for m in expanded]
-    standardised_no_nan = [m.mask(m.isna(), 0.0) for m in standardised]
+        union = np.any(matrices > 0, axis=0)
+        degree = (union.sum(axis=0) + union.sum(axis=1) - np.diag(union)).astype(float)
+        corrected = rewiring / degree
 
-    standard_sums = standardised_no_nan[0].copy()
-    for m in standardised_no_nan[1:]:
-        standard_sums = standard_sums + m
-    centroid = standard_sums / len(standardised_no_nan)
-
-    standard_minus_centroid = [m - centroid for m in standardised_no_nan]
-    squared = _square_matrices(standard_minus_centroid)
-    cent_dist = _centroid_distance(squared)
-    cent_dist_bound = np.vstack([s.to_numpy() for s in cent_dist])
-    cent_final_dist = cent_dist_bound.sum(axis=0)
-    rewiring = cent_final_dist / (len(cent_dist) - 1)
-
-    unimatrix = _union_adjacency_matrices(matrix_list_str)
-    out_degree = unimatrix.sum(axis=1).to_numpy(dtype=float)
-    in_degree = unimatrix.sum(axis=0).to_numpy(dtype=float)
-    self_loops = np.diag(unimatrix.to_numpy(dtype=float))
-    degree = out_degree + in_degree - self_loops
-    degree_df = pd.DataFrame({"name": unimatrix.index, "degree": degree})
-
-    rewiring_df = pd.DataFrame(
-        {
-            "name": expanded[0].columns,
-            "rewiring": rewiring,
-        }
-    )
-    output = rewiring_df.merge(degree_df, on="name", how="left")
-    output["degree_corrected_rewiring"] = output["rewiring"] / output["degree"]
-    return output
+    return pd.DataFrame({
+        "name": pd.Index(networks.node_names),
+        "rewiring": rewiring,
+        "degree": degree,
+        "degree_corrected_rewiring": corrected,
+    })
 
 
 def rewiring_plot(
@@ -343,7 +324,7 @@ def rewiring_plot(
     structure_only: bool = False,
 ):
     networks = prepare_networks(matrix_list)
-    node_names = _ordered_unique(node for net in networks.values() for node in net.nodes)
+    node_names = networks.node_names
     node_order = {node: i for i, node in enumerate(node_names)}
     union_edges = set()
     for net in networks.values():

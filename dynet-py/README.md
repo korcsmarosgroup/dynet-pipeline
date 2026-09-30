@@ -182,10 +182,29 @@ structural comparisons. Jaccard compares labeled directed edges, so node orderin
 and different node sets are handled correctly.
 
 For edge-list inputs, targeting, Jaccard, and plotting operate on normalized edges
-without allocating dense adjacency matrices. Rewiring builds and caches matrices
-when needed. `format_indata` uses the same prepared collection and returns copies
-of its adjacency matrices, so editing an exported matrix does not alter the cache.
-The CLI automatically reuses prepared networks.
+without allocating dense adjacency matrices. Rewiring builds one cached NumPy
+array shaped `(networks, nodes, nodes)`, aligned to the union of node labels, and
+performs its calculations over the whole array. Edge-list inputs populate this
+array directly, without intermediate DataFrame matrices. The CLI automatically
+reuses prepared networks.
+
+The aligned array and its labels are also available explicitly:
+
+```python
+adjacency = networks.adjacency_tensor()  # read-only float64; created on first use
+network_names = tuple(networks)         # axis 0
+node_names = networks.node_names        # source axis 1 and target axis 2
+```
+
+Nodes absent from a network have zero rows and columns. Repeated calls return the
+same cached array; use `adjacency.copy()` to obtain a writable copy. Structural
+rewiring does not change the cached weights. Dense storage scales with the number
+of networks times the square of the total node count, so this array is only
+allocated when requested or needed for rewiring.
+
+For compatibility, `format_indata` still returns a list of per-network DataFrame
+matrices with their original node sets. These are copies, so editing an exported
+matrix does not alter the prepared inputs.
 
 ### Validation at preparation
 

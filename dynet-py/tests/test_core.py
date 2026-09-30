@@ -115,13 +115,14 @@ def test_jaccard_compares_labels_and_ignores_matrix_order():
 
 def test_edge_operations_do_not_build_dense_matrices(monkeypatch):
     import matplotlib.pyplot as plt
-    from dynet_py import prepare_networks
+    from dynet_py import PreparedNetworks, prepare_networks
     from dynet_py.core import _PreparedNetwork
 
     def unexpected_matrix(self):
         raise AssertionError("Edge operations must not allocate adjacency matrices")
 
     monkeypatch.setattr(_PreparedNetwork, "adjacency", unexpected_matrix)
+    monkeypatch.setattr(PreparedNetworks, "adjacency_tensor", unexpected_matrix)
     # Duplicate cancellation must remove the edge but retain its nodes.
     el = pd.DataFrame({"from": ["A", "A", "B", "C"],
                        "to": ["B", "B", "C", "C"], "weight": [2., -2., -3., 4.]})
