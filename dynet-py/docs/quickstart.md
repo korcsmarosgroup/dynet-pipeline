@@ -23,6 +23,25 @@ targeting = compare_targeting(networks)
 fig = rewiring_plot(networks, rewiring)
 ```
 
+## Condition Comparison Tables
+
+```python
+from dynet_py import prepare_condition_data, compare_conditions, plot_condition_changes
+
+data = prepare_condition_data(pd.concat([
+    net1.assign(condition="T0"), net2.assign(condition="T1"),
+], ignore_index=True))
+nodes = compare_conditions(data, conditions=["T0", "T1"])
+print(nodes[["node", "degree_change_score"]])
+edges = compare_conditions(data, conditions=["T0", "T1"], output="edges")
+summary = compare_conditions(data, conditions=["T0", "T1"], output="summary")
+nodes.to_csv("node_changes.csv", index=False)
+fig = plot_condition_changes(summary)
+```
+
+These are degree changes and edge counts. For standardized rewiring scores, use
+the first example's `rewiring_analysis` table.
+
 ## Run The Included Example
 
 ```bash

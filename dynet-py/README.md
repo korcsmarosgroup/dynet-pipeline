@@ -49,6 +49,12 @@ update scripts that read their old `rewiring_score` column to use
 old column name. The values are unchanged. `dynet_plot` accepts either format.
 See the [API reference](docs/api.md) for input formats, return values, and examples.
 
+Comparison functions, including `dynet_main` and `dynet_internal`, now return a
+pandas DataFrame by default. Use `output="nodes"` (default), `output="edges"`, or
+`output="summary"` to choose the table. Each row identifies its conditions;
+measurement columns use fixed `_a`/`_b` suffixes. For scripts that access the old
+nested dictionaries, add `output="legacy"`.
+
 ## Install
 
 Use a virtual environment and install with the same interpreter you will run:
@@ -172,8 +178,12 @@ raw = pd.DataFrame(
 )
 
 condition_data = prepare_condition_data(raw)
-changes = compare_conditions(condition_data, conditions=["T0", "T1"])
-fig = plot_condition_changes(changes, what="edges")
+nodes = compare_conditions(condition_data, conditions=["T0", "T1"])
+edges = compare_conditions(condition_data, conditions=["T0", "T1"], output="edges")
+summary = compare_conditions(condition_data, conditions=["T0", "T1"], output="summary")
+print(nodes[["condition_a", "condition_b", "node", "degree_change_score"]])
+nodes.to_csv("node_changes.csv", index=False)
+fig = plot_condition_changes(summary)
 ```
 
 This returns gained/lost/kept edges and degree-change tables. It does not calculate

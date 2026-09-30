@@ -1008,34 +1008,40 @@ def compare_condition_pair(
     data: pd.DataFrame,
     condition_a: str,
     condition_b: str,
-) -> Dict[str, Union[pd.DataFrame, dict, str]]:
+    *, output: str = "nodes",
+) -> Union[pd.DataFrame, dict]:
     """Compare edge membership and node degrees between two conditions.
 
     Args:
         data: Condition-edge table from ``prepare_condition_data``.
         condition_a: Baseline condition label.
         condition_b: Comparison condition label; changes are B minus A.
+        output: ``nodes`` (default), ``edges``, or ``summary`` selects a flat
+            DataFrame. ``legacy`` restores the historical nested dictionary.
 
     Returns:
-        A dictionary with ``comparison``, ``edge_changes``, ``node_changes``,
-            and ``summary``. Edges are labeled ``gained``, ``lost``, or ``kept``.
-            Nodes are ranked by ``degree_change_score`` = abs(delta_degree) +
-            abs(delta_weight_degree), where weighted degree is the signed sum of
-            incoming and outgoing weights. Retained self-loops count twice in degree.
+        A DataFrame with ``comparison``, ``condition_a``, and ``condition_b``
+            plus the selected results. Node rows contain ``degree_change_score``
+            = abs(delta_degree) + abs(delta_weight_degree); edge rows contain
+            ``source``, ``target``, ``status``, ``weight_a``, ``weight_b``, and
+            ``delta_weight``. Summary output contains one row of counts.
+            See ``compare_conditions`` for column conventions.
 
     Raises:
-        ValueError: The table schema is wrong or conditions are absent/equal.
+        ValueError: Invalid table schema, output choice, or absent/equal conditions.
 
     Note:
         This degree-change heuristic is not the standardized ``rewiring`` score
         from ``rewiring_analysis``. It can be zero even if neighbors change.
         Edge membership follows table rows, including rows with zero weight.
     """
+    _validate_condition_output(output)
     names = _condition_names(data)
     condition_a, condition_b = str(condition_a), str(condition_b)
     if condition_a == condition_b or condition_a not in names or condition_b not in names:
         raise ValueError("Choose two distinct condition labels present in the prepared table.")
-    return _compare_condition_pair(data, condition_a, condition_b)
+    result = _compare_condition_pair(data, condition_a, condition_b)
+    return _legacy_comparison(result) if output == "legacy" else _condition_table([result], output)
 
 
 def _compare_condition_pair(
@@ -1068,30 +1074,17 @@ def _compare_condition_pair(
 
     edge_changes = pd.DataFrame(
         all_edges,
-        columns=["source", "target", "status", f"weight_{condition_a}", f"weight_{condition_b}", "delta_weight"],
+        columns=["source", "target", "status", "weight_a", "weight_b", "delta_weight"],
     )
 
-    deg_a = _degree_table(df_a).rename(
-        columns={
-            "in_degree": f"in_degree_{condition_a}",
-            "out_degree": f"out_degree_{condition_a}",
-            "degree": f"degree_{condition_a}",
-            "weight_degree": f"weight_degree_{condition_a}",
-        }
-    )
-    deg_b = _degree_table(df_b).rename(
-        columns={
-            "in_degree": f"in_degree_{condition_b}",
-            "out_degree": f"out_degree_{condition_b}",
-            "degree": f"degree_{condition_b}",
-            "weight_degree": f"weight_degree_{condition_b}",
-        }
-    )
+    metrics = ("in_degree", "out_degree", "degree", "in_weight", "out_weight", "weight_degree")
+    deg_a = _degree_table(df_a).rename(columns={name: f"{name}_a" for name in metrics})
+    deg_b = _degree_table(df_b).rename(columns={name: f"{name}_b" for name in metrics})
 
     node_changes = deg_a.merge(deg_b, on="node", how="outer").fillna(0)
-    node_changes["delta_degree"] = node_changes[f"degree_{condition_b}"] - node_changes[f"degree_{condition_a}"]
+    node_changes["delta_degree"] = node_changes["degree_b"] - node_changes["degree_a"]
     node_changes["delta_weight_degree"] = (
-        node_changes[f"weight_degree_{condition_b}"] - node_changes[f"weight_degree_{condition_a}"]
+        node_changes["weight_degree_b"] - node_changes["weight_degree_a"]
     )
     node_changes["degree_change_score"] = node_changes["delta_degree"].abs() + node_changes["delta_weight_degree"].abs()
     node_changes = node_changes.sort_values("degree_change_score", ascending=False).reset_index(drop=True)
@@ -1115,11 +1108,49 @@ def _compare_condition_pair(
     }
 
 
+def _validate_condition_output(output: str) -> None:
+    if output not in {"nodes", "edges", "summary", "legacy"}:
+        raise ValueError("output must be 'nodes', 'edges', 'summary', or 'legacy'")
+
+
+def _condition_table(comparisons: Sequence[dict], output: str) -> pd.DataFrame:
+    """Stack comparisons with fixed columns and condition labels stored as values."""
+    if output == "summary":
+        return pd.DataFrame([{"comparison": item["comparison"], **item["summary"]}
+                             for item in comparisons])
+    frames = []
+    for item in comparisons:
+        frame = item["node_changes" if output == "nodes" else "edge_changes"].copy()
+        if output == "edges":
+            frame = frame.sort_values(["source", "target"])
+        frame.insert(0, "condition_b", item["summary"]["condition_b"])
+        frame.insert(0, "condition_a", item["summary"]["condition_a"])
+        frame.insert(0, "comparison", item["comparison"])
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
+
+
+def _legacy_comparison(item: dict) -> dict:
+    """Restore historical condition-specific column names only on explicit request."""
+    a, b = item["summary"]["condition_a"], item["summary"]["condition_b"]
+    node_columns = {f"{metric}_{side}": f"{metric}_{condition}"
+                    for side, condition in (("a", a), ("b", b))
+                    for metric in ("in_degree", "out_degree", "degree", "weight_degree")}
+    node_columns.update({f"{metric}_{side}": f"{metric}_{suffix}"
+                         for side, suffix in (("a", "x"), ("b", "y"))
+                         for metric in ("in_weight", "out_weight")})
+    return {**item,
+            "node_changes": item["node_changes"].rename(columns=node_columns),
+            "edge_changes": item["edge_changes"].rename(columns={"weight_a": f"weight_{a}",
+                                                               "weight_b": f"weight_{b}"})}
+
+
 def compare_conditions(
     data: pd.DataFrame,
     conditions: Optional[Iterable[str]] = None,
     pairwise: str = "adjacent",
-) -> Dict[str, Union[list, pd.DataFrame]]:
+    *, output: str = "nodes",
+) -> Union[pd.DataFrame, dict]:
     """Run edge/degree-change comparisons for selected pairs of conditions.
 
     Args:
@@ -1128,21 +1159,30 @@ def compare_conditions(
             ``data``; supply temporal order explicitly if it matters.
         pairwise: ``adjacent`` compares neighboring labels in that order;
             ``all`` compares every unordered pair, with earlier labels as A.
+        output: ``nodes`` (default), ``edges``, or ``summary`` selects a flat
+            DataFrame. ``legacy`` restores the historical nested dictionary.
 
     Returns:
-        A dictionary with ``comparisons`` (one ``compare_condition_pair`` result
-            per pair) and ``edge_counts`` (a summary DataFrame). Pass it to
-            ``plot_condition_changes``. Node tables use ``degree_change_score``.
+        A DataFrame with one row per node, edge, or comparison, depending on
+            ``output``. Every row has ``comparison``, ``condition_a``, and
+            ``condition_b``. Measurements use fixed ``_a``/``_b`` suffixes;
+            condition labels are values, never part of the table's column names.
+            Node tables include incoming/outgoing degrees and weight sums, total
+            degrees, B-minus-A deltas, and ``degree_change_score``. Edge tables
+            include endpoints, status, weights, and delta_weight. Summary tables
+            contain edge/node counts. All tables can be saved directly to CSV
+            or passed to ``plot_condition_changes``.
 
     Raises:
         ValueError: Invalid table schema, fewer than two conditions, unknown or
-            duplicate condition labels, or an unsupported pairwise mode.
+            duplicate condition labels, or an unsupported pairwise/output mode.
 
     Note:
         This orchestrates condition comparisons only. It does not call
         ``rewiring_analysis`` and its heuristic is not a rewiring-score estimate.
         The legacy name ``dynet_main`` was not a main entry point for scoring.
     """
+    _validate_condition_output(output)
     available = _condition_names(data)
     if conditions is None:
         conditions = available
@@ -1165,6 +1205,10 @@ def compare_conditions(
 
     comparisons = [_compare_condition_pair(data, a, b) for a, b in pairs]
 
+    if output != "legacy":
+        return _condition_table(comparisons, output)
+    comparisons = [_legacy_comparison(item) for item in comparisons]
+
     edge_counts = pd.DataFrame(
         [
             {
@@ -1179,8 +1223,8 @@ def compare_conditions(
 
 
 def plot_condition_changes(
-    result: Dict[str, Union[list, pd.DataFrame]],
-    what: str = "edges",
+    result: Union[pd.DataFrame, dict],
+    what: Optional[str] = None,
     comparison: int = 0,
     top_n: int = 20,
     ax: Optional[Axes] = None,
@@ -1188,10 +1232,14 @@ def plot_condition_changes(
     """Plot edge-status counts or degree-change rankings from condition comparisons.
 
     Args:
-        result: Dictionary returned by ``compare_conditions``.
+        result: Node, edge, or summary DataFrame from ``compare_conditions`` or
+            ``compare_condition_pair``. Historical dictionaries also work.
         what: ``edges`` for gained/lost/kept counts; ``nodes`` for the top nodes
-            ranked by ``degree_change_score``.
-        comparison: Index in ``result["comparisons"]``, using Python list indexing.
+            ranked by ``degree_change_score``. Defaults to the table's content,
+            or ``edges`` for a historical dictionary.
+        comparison: Index of the condition pair in appearance order; negative
+            indices follow Python indexing. Pair identity uses both condition
+            columns, so labels containing ``_vs_`` remain distinguishable.
         top_n: Maximum number of nodes shown for a node plot.
         ax: Optional matplotlib Axes to draw into; otherwise create a figure.
 
@@ -1201,31 +1249,56 @@ def plot_condition_changes(
 
     Raises:
         IndexError: The comparison index is out of range.
-        ValueError: The plot type is not ``edges`` or ``nodes``.
+        ValueError: An unsupported plot type or a table lacking the required
+            columns. Edge plots need an edge or summary table, node plots a node table.
     """
-    comparisons = result["comparisons"]
-    if comparison >= len(comparisons):
-        raise IndexError("comparison index out of range")
-
-    comp = comparisons[comparison]
+    if what not in {None, "edges", "nodes"}:
+        raise ValueError("what must be 'edges' or 'nodes'")
+    if isinstance(result, dict):
+        comp = result.get("comparisons", [result])[comparison]
+        what = what or "edges"
+        table = comp["node_changes" if what == "nodes" else "edge_changes"].assign(
+            comparison=comp["comparison"], condition_a=comp["summary"]["condition_a"],
+            condition_b=comp["summary"]["condition_b"],
+        )
+        comparison = 0
+    elif isinstance(result, pd.DataFrame):
+        table = result
+    else:
+        raise ValueError("Expected a condition-comparison DataFrame or historical result dictionary.")
+    table = table.rename(columns={"rewiring_score": "degree_change_score"})
+    identifiers = ["comparison", "condition_a", "condition_b"]
+    if not set(identifiers).issubset(table.columns):
+        raise ValueError("The table must include comparison, condition_a, and condition_b columns.")
+    selected = table[identifiers].drop_duplicates().iloc[comparison]
+    rows = table[(table["condition_a"] == selected["condition_a"])
+                 & (table["condition_b"] == selected["condition_b"])]
+    what = what or ("nodes" if "degree_change_score" in table else "edges")
+    if what == "edges":
+        statuses = ["gained", "lost", "kept"]
+        if "status" in rows:
+            counts = rows["status"].value_counts().reindex(statuses, fill_value=0)
+        elif {f"n_{status}" for status in statuses}.issubset(rows.columns):
+            counts = pd.Series([rows.iloc[0][f"n_{status}"] for status in statuses], index=statuses)
+        else:
+            raise ValueError("Edge plots require output='edges' or output='summary'.")
+    else:
+        if not {"node", "degree_change_score"}.issubset(rows.columns):
+            raise ValueError("Node plots require output='nodes'.")
+        top = rows.sort_values("degree_change_score", ascending=False, kind="stable").head(top_n).iloc[::-1]
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 5))
-
     if what == "edges":
-        counts = comp["edge_changes"]["status"].value_counts().reindex(["gained", "lost", "kept"]).fillna(0)
         colors = ["#2a9d8f", "#e76f51", "#264653"]
         ax.bar(counts.index, counts.values, color=colors)
-        ax.set_title(f"Edge Changes: {comp['comparison']}")
+        ax.set_title(f"Edge Changes: {selected['comparison']}")
         ax.set_ylabel("Edge count")
         ax.set_xlabel("Status")
-    elif what == "nodes":
-        top = comp["node_changes"].head(top_n).iloc[::-1]
+    else:
         ax.barh(top["node"], top["degree_change_score"], color="#457b9d")
-        ax.set_title(f"Node Degree Changes: {comp['comparison']}")
+        ax.set_title(f"Node Degree Changes: {selected['comparison']}")
         ax.set_xlabel("Degree-change score")
         ax.set_ylabel("Node")
-    else:
-        raise ValueError("what must be 'edges' or 'nodes'")
 
     plt.tight_layout()
     return ax.figure
@@ -1237,8 +1310,8 @@ def _rename_comparison_score(comparison: dict, old: str, new: str) -> dict:
 
 def dynet_internal(
     data: pd.DataFrame, condition_a: str, condition_b: str,
-    *, legacy_score_name: bool = False,
-) -> Dict[str, Union[pd.DataFrame, dict, str]]:
+    *, output: str = "nodes", legacy_score_name: bool = False,
+) -> Union[pd.DataFrame, dict]:
     """Historical entry point for ``compare_condition_pair``.
 
     Despite its historical name this is callable publicly. It accepts a prepared
@@ -1251,22 +1324,26 @@ def dynet_internal(
         data: Condition-edge table from ``prepare_condition_data``.
         condition_a: Baseline condition label.
         condition_b: Comparison condition label; changes are B minus A.
+        output: ``nodes`` (default), ``edges``, or ``summary`` returns a DataFrame;
+            ``legacy`` restores the historical dictionary.
         legacy_score_name: Opt in to the historical ``rewiring_score`` column
             name for existing scripts. Only the name changes, not the metric.
 
     Returns:
-        The pair-comparison dictionary described by ``compare_condition_pair``.
+        The selected table or legacy dictionary from ``compare_condition_pair``.
     """
-    result = compare_condition_pair(data, condition_a, condition_b)
+    result = compare_condition_pair(data, condition_a, condition_b, output=output)
     if legacy_score_name:
-        result = _rename_comparison_score(result, "degree_change_score", "rewiring_score")
+        result = (result.rename(columns={"degree_change_score": "rewiring_score"})
+                  if isinstance(result, pd.DataFrame) else
+                  _rename_comparison_score(result, "degree_change_score", "rewiring_score"))
     return result
 
 
 def dynet_main(
     data: pd.DataFrame, conditions: Optional[Iterable[str]] = None, pairwise: str = "adjacent",
-    *, legacy_score_name: bool = False,
-) -> Dict[str, Union[list, pd.DataFrame]]:
+    *, output: str = "nodes", legacy_score_name: bool = False,
+) -> Union[pd.DataFrame, dict]:
     """Historical entry point for condition comparisons and degree-change scores.
 
     Node results use ``degree_change_score`` = abs(delta_degree) +
@@ -1278,21 +1355,26 @@ def dynet_main(
         data: Condition-edge table from ``prepare_condition_data``.
         conditions: Ordered condition labels; defaults to appearance in data.
         pairwise: ``adjacent`` or ``all``, as in ``compare_conditions``.
+        output: ``nodes`` (default), ``edges``, or ``summary`` returns a DataFrame;
+            ``legacy`` restores the historical nested dictionary.
         legacy_score_name: Opt in to the historical ``rewiring_score`` column
             name for existing scripts. Only the name changes, not the metric.
 
     Returns:
-        The comparison dictionaries and edge-count table from ``compare_conditions``.
+        The selected table or legacy dictionary from ``compare_conditions``.
     """
-    result = compare_conditions(data, conditions, pairwise)
+    result = compare_conditions(data, conditions, pairwise, output=output)
     if legacy_score_name:
-        result["comparisons"] = [_rename_comparison_score(item, "degree_change_score", "rewiring_score")
-                                 for item in result["comparisons"]]
+        if isinstance(result, pd.DataFrame):
+            result = result.rename(columns={"degree_change_score": "rewiring_score"})
+        else:
+            result["comparisons"] = [_rename_comparison_score(item, "degree_change_score", "rewiring_score")
+                                     for item in result["comparisons"]]
     return result
 
 
 def dynet_plot(
-    result: Dict[str, Union[list, pd.DataFrame]], what: str = "edges", comparison: int = 0,
+    result: Union[pd.DataFrame, dict], what: Optional[str] = None, comparison: int = 0,
     top_n: int = 20, ax: Optional[Axes] = None,
 ) -> Figure:
     """Plot current or historical ``dynet_main`` results as condition changes.
@@ -1303,8 +1385,4 @@ def dynet_plot(
     ``rewiring_plot`` to display actual standardized rewiring scores; use
     ``plot_condition_changes`` for new comparison results.
     """
-    converted = {**result, "comparisons": [
-        _rename_comparison_score(item, "rewiring_score", "degree_change_score")
-        for item in result["comparisons"]
-    ]}
-    return plot_condition_changes(converted, what, comparison, top_n, ax)
+    return plot_condition_changes(result, what, comparison, top_n, ax)

@@ -37,9 +37,8 @@ def test_dynet_main_detects_gained_and_lost_edges():
             "weight": [1, 1, 1, 1],
         }
     )
-    out = dynet_main(package_data(raw), conditions=["T0", "T1"])
-    comp = out["comparisons"][0]
-    statuses = comp["edge_changes"]["status"].value_counts().to_dict()
+    out = dynet_main(package_data(raw), conditions=["T0", "T1"], output="edges")
+    statuses = out["status"].value_counts().to_dict()
     assert statuses.get("lost", 0) == 2
     assert statuses.get("gained", 0) == 2
 
@@ -53,8 +52,8 @@ def test_dynet_main_all_pairwise():
             "weight": [1, 1, 1],
         }
     )
-    out = dynet_main(package_data(raw), pairwise="all")
-    assert len(out["comparisons"]) == 3
+    out = dynet_main(package_data(raw), pairwise="all", output="summary")
+    assert len(out) == 3
 
 
 def test_rewiring_analysis_returns_expected_columns():
