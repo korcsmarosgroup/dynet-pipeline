@@ -124,6 +124,25 @@ res = rewiring_analysis(networks)
 fig = rewiring_plot(networks, res)
 ```
 
+## Jupyter tutorial
+
+Open [the tutorial notebook](examples/dynet_py_tutorial.ipynb) for a self-contained
+example of the updated API. It covers prepared inputs, canonical column names,
+the two score types, node/edge/summary tables, plotting, CSV export, and sparse
+versus dense scoring. The notebook includes executed outputs and checks with
+known expected answers.
+
+From this `dynet-py` directory, with your Python environment active:
+
+```bash
+python -m pip install -e . jupyterlab ipykernel
+python -m jupyterlab examples/dynet_py_tutorial.ipynb
+```
+
+Choose a kernel from that environment and select **Restart Kernel and Run All
+Cells**. The export section writes CSV tables and PNG plots under `tutorial_output/`
+in the notebook's working directory. No input data download is needed.
+
 ## Example script
 
 Runnable example:

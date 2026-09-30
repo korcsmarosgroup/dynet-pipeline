@@ -2,6 +2,11 @@
 
 This tutorial shows the full flow from edge-list data to rewiring outputs.
 
+For a self-contained, executable example of the updated API, use the
+[Jupyter tutorial notebook](https://github.com/korcsmarosgroup/dynet-pipeline/blob/main/dynet-py/examples/dynet_py_tutorial.ipynb).
+It includes data, expected results, plots, flat condition-comparison tables, and
+dense/sparse checks. See [Quickstart](../quickstart.md#jupyter-notebook) for launch instructions.
+
 ## 1. Prepare Data
 
 Your network tables must include:

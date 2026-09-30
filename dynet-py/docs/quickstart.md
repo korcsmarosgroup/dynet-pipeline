@@ -1,5 +1,21 @@
 # Quickstart
 
+## Jupyter Notebook
+
+For an executable walkthrough with known expected results, open the
+[tutorial notebook](https://github.com/korcsmarosgroup/dynet-pipeline/blob/main/dynet-py/examples/dynet_py_tutorial.ipynb).
+From `dynet-py`, with your Python environment active:
+
+```bash
+python -m pip install -e . jupyterlab ipykernel
+python -m jupyterlab examples/dynet_py_tutorial.ipynb
+```
+
+Select a kernel from the same environment, then **Restart Kernel and Run All
+Cells**. It covers both workflows, flat tables, plotting, CSV export, aliases,
+validation, and the dense/sparse backends. Its export section writes files under
+`tutorial_output/` in the notebook's working directory.
+
 ## API Example
 
 This calculates standardized per-node rewiring scores. The separate
