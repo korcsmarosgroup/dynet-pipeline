@@ -1198,34 +1198,57 @@ def _rename_comparison_score(comparison: dict, old: str, new: str) -> dict:
 
 def dynet_internal(
     data: pd.DataFrame, condition_a: str, condition_b: str,
+    *, legacy_score_name: bool = False,
 ) -> Dict[str, Union[pd.DataFrame, dict, str]]:
-    """Compatibility wrapper for ``compare_condition_pair``.
+    """Historical entry point for ``compare_condition_pair``.
 
     Despite its historical name this is callable publicly. It accepts a prepared
     condition-edge table and two condition labels, returning the pair comparison.
-    The historical ``rewiring_score`` column is retained, but it means
-    abs(delta_degree) + abs(delta_weight_degree), not the standardized score from
-    ``rewiring_analysis``. New code should use ``compare_condition_pair``, whose
-    output calls this column ``degree_change_score``.
+    Node results use ``degree_change_score`` = abs(delta_degree) +
+    abs(delta_weight_degree). This is not the standardized ``rewiring`` score
+    from ``rewiring_analysis``. New code should use ``compare_condition_pair``.
+
+    Args:
+        data: Condition-edge table from ``prepare_condition_data``.
+        condition_a: Baseline condition label.
+        condition_b: Comparison condition label; changes are B minus A.
+        legacy_score_name: Opt in to the historical ``rewiring_score`` column
+            name for existing scripts. Only the name changes, not the metric.
+
+    Returns:
+        The pair-comparison dictionary described by ``compare_condition_pair``.
     """
-    return _rename_comparison_score(compare_condition_pair(data, condition_a, condition_b),
-                                    "degree_change_score", "rewiring_score")
+    result = compare_condition_pair(data, condition_a, condition_b)
+    if legacy_score_name:
+        result = _rename_comparison_score(result, "degree_change_score", "rewiring_score")
+    return result
 
 
 def dynet_main(
     data: pd.DataFrame, conditions: Optional[Iterable[str]] = None, pairwise: str = "adjacent",
+    *, legacy_score_name: bool = False,
 ) -> Dict[str, Union[list, pd.DataFrame]]:
-    """Compatibility wrapper for ``compare_conditions``, not a rewiring pipeline.
+    """Historical entry point for condition comparisons and degree-change scores.
 
-    Accepts a condition-edge table, optional ordered conditions, and ``adjacent``
-    or ``all`` pairing. Returns comparison dictionaries and an edge-count table,
-    preserving the historical ``rewiring_score`` column for the degree-change
-    heuristic. It never calls ``rewiring_analysis``. New code should use
-    ``compare_conditions`` and its unambiguous ``degree_change_score`` column.
+    Node results use ``degree_change_score`` = abs(delta_degree) +
+    abs(delta_weight_degree). This function never calls ``rewiring_analysis``;
+    its heuristic is different from that calculator's ``rewiring`` column.
+    New code should use ``compare_conditions``.
+
+    Args:
+        data: Condition-edge table from ``prepare_condition_data``.
+        conditions: Ordered condition labels; defaults to appearance in data.
+        pairwise: ``adjacent`` or ``all``, as in ``compare_conditions``.
+        legacy_score_name: Opt in to the historical ``rewiring_score`` column
+            name for existing scripts. Only the name changes, not the metric.
+
+    Returns:
+        The comparison dictionaries and edge-count table from ``compare_conditions``.
     """
     result = compare_conditions(data, conditions, pairwise)
-    result["comparisons"] = [_rename_comparison_score(item, "degree_change_score", "rewiring_score")
-                             for item in result["comparisons"]]
+    if legacy_score_name:
+        result["comparisons"] = [_rename_comparison_score(item, "degree_change_score", "rewiring_score")
+                                 for item in result["comparisons"]]
     return result
 
 
@@ -1233,12 +1256,13 @@ def dynet_plot(
     result: Dict[str, Union[list, pd.DataFrame]], what: str = "edges", comparison: int = 0,
     top_n: int = 20, ax: Optional[Axes] = None,
 ) -> Figure:
-    """Plot a legacy ``dynet_main`` result through ``plot_condition_changes``.
+    """Plot current or historical ``dynet_main`` results as condition changes.
 
     Accepts the same plot options and returns a matplotlib Figure. Historical
-    ``rewiring_score`` columns are interpreted as degree-change scores, without
-    mutating the input. Use ``rewiring_plot`` to display actual standardized
-    rewiring scores; use ``plot_condition_changes`` for new comparison results.
+    ``rewiring_score`` columns and current ``degree_change_score`` columns are
+    interpreted as degree-change scores, without mutating the input. Use
+    ``rewiring_plot`` to display actual standardized rewiring scores; use
+    ``plot_condition_changes`` for new comparison results.
     """
     converted = {**result, "comparisons": [
         _rename_comparison_score(item, "rewiring_score", "degree_change_score")

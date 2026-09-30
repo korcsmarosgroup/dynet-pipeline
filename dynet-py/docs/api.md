@@ -111,15 +111,40 @@ figure = plot_condition_changes(changes, what="nodes")
 | Historical name | Preferred name | Compatibility behavior |
 | --- | --- | --- |
 | `package_data` | `prepare_condition_data` | Retains historical conversion of invalid/missing weights to zero; the new function rejects them. |
-| `dynet_internal` | `compare_condition_pair` | Retains `rewiring_score` as the column name for the degree-change heuristic. |
-| `dynet_main` | `compare_conditions` | Retains legacy comparison dictionaries and their `rewiring_score` column. |
-| `dynet_plot` | `plot_condition_changes` | Accepts legacy result dictionaries and labels plots as degree changes. |
+| `dynet_internal` | `compare_condition_pair` | Uses `degree_change_score`; pass `legacy_score_name=True` for the historical column name. |
+| `dynet_main` | `compare_conditions` | Uses `degree_change_score`; pass `legacy_score_name=True` for the historical column name. |
+| `dynet_plot` | `plot_condition_changes` | Accepts current and historical result dictionaries and labels plots as degree changes. |
 
 Existing imports continue to work without deprecation warnings. New code should
-use the descriptive names and `degree_change_score`. The old score column is not
-renamed in existing results, and neither condition-comparison entry point calls
-`rewiring_analysis`. `package_data_rename` and `package_data_remap` remain
-documented compatibility utilities for selecting columns and remapping labels.
+use the descriptive names and `degree_change_score`. Neither condition-comparison
+entry point calls `rewiring_analysis`. `package_data_rename` and
+`package_data_remap` remain documented compatibility utilities for selecting
+columns and remapping labels.
+
+### Migrating the Historical Score Column
+
+**The default output schema of `dynet_main` and `dynet_internal` has changed:**
+their node tables now contain `degree_change_score` instead of `rewiring_score`.
+The formula, values, and ranking are unchanged. Update column lookups and any CSV
+consumers accordingly. This correction does not add standardized rewiring scores
+to the condition-comparison output.
+
+```python
+# Correct name by default, including through the historical entry point:
+from dynet_py import dynet_main
+
+changes = dynet_main(data)
+degree_changes = changes["comparisons"][0]["node_changes"]["degree_change_score"]
+
+# Explicit compatibility option for a script requiring the old schema:
+old_format = dynet_main(data, legacy_score_name=True)
+# Its "rewiring_score" column still contains the degree-change heuristic.
+```
+
+The keyword-only `legacy_score_name` option is also available on `dynet_internal`.
+It changes only the column name. Existing saved results are not modified, and
+`dynet_plot` accepts both names. For standardized scores, use
+`rewiring_analysis(networks)["rewiring"]`.
 
 ## Module Reference
 

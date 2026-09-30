@@ -36,9 +36,12 @@ The earlier names remain available for compatibility:
   with new comparison results.
 - `package_data_rename` and `package_data_remap`: column/label utilities.
 
-`dynet_main` never calls `rewiring_analysis`. Its historical `rewiring_score`
-column is the degree-change heuristic, retained only for compatibility. See the
-[API reference](docs/api.md) for input formats, return values, and migration notes.
+`dynet_main` never calls `rewiring_analysis`. Both `dynet_main` and
+`dynet_internal` now return `degree_change_score` by default. **Migration:**
+update scripts that read their old `rewiring_score` column to use
+`degree_change_score`, or explicitly pass `legacy_score_name=True` to retain the
+old column name. The values are unchanged. `dynet_plot` accepts either format.
+See the [API reference](docs/api.md) for input formats, return values, and examples.
 
 ## Install
 

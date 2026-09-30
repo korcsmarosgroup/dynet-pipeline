@@ -1,3 +1,5 @@
+from functools import partial
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import pytest
@@ -25,9 +27,16 @@ def _swapped_neighbors():
     })
 
 
-def test_degree_change_and_standardized_rewiring_are_distinct_metrics():
+@pytest.mark.parametrize("analyze, batch", [
+    (compare_condition_pair, False), (dynet_internal, False),
+    (compare_conditions, True), (dynet_main, True),
+])
+def test_degree_change_and_standardized_rewiring_are_distinct_metrics(analyze, batch):
     data = prepare_condition_data(_swapped_neighbors())
-    changes = compare_condition_pair(data, "T0", "T1")
+    if batch:
+        changes = analyze(data)["comparisons"][0]
+    else:
+        changes = analyze(data, "T0", "T1")
     assert changes["summary"]["n_gained"] == 2
     assert changes["summary"]["n_lost"] == 2
     assert changes["node_changes"]["degree_change_score"].eq(0).all()
@@ -54,20 +63,23 @@ def test_pair_comparison_score_and_direction():
     assert result["node_changes"]["degree_change_score"].eq(2).all()
 
 
-def test_legacy_entry_points_preserve_result_schema_and_values():
+@pytest.mark.parametrize("legacy_score_name", [False, True])
+def test_historical_entry_points_preserve_values_with_explicit_column_choice(legacy_score_name):
     raw = _swapped_neighbors()
+    raw.loc[0, "weight"] = 3.
     pd.testing.assert_frame_equal(package_data(raw), prepare_condition_data(raw))
     data = prepare_condition_data(raw)
     current = compare_conditions(data)
-    legacy = dynet_main(data)
+    legacy = dynet_main(data, legacy_score_name=legacy_score_name)
+    score_column = "rewiring_score" if legacy_score_name else "degree_change_score"
     pd.testing.assert_frame_equal(current["edge_counts"], legacy["edge_counts"])
     for new_pair, old_pair in zip(current["comparisons"], legacy["comparisons"]):
         assert old_pair["summary"] == new_pair["summary"]
         assert old_pair["comparison"] == new_pair["comparison"]
         pd.testing.assert_frame_equal(old_pair["edge_changes"], new_pair["edge_changes"])
         pd.testing.assert_frame_equal(old_pair["node_changes"], new_pair["node_changes"].rename(
-            columns={"degree_change_score": "rewiring_score"}))
-    pair = dynet_internal(data, "T0", "T1")
+            columns={"degree_change_score": score_column}))
+    pair = dynet_internal(data, "T0", "T1", legacy_score_name=legacy_score_name)
     pd.testing.assert_frame_equal(pair["node_changes"], legacy["comparisons"][0]["node_changes"])
 
 
@@ -112,6 +124,7 @@ def test_condition_comparison_rejects_invalid_selection(conditions):
 
 @pytest.mark.parametrize("plotter, analyze", [
     (plot_condition_changes, compare_conditions), (dynet_plot, dynet_main),
+    (dynet_plot, partial(dynet_main, legacy_score_name=True)),
 ])
 @pytest.mark.parametrize("what", ["nodes", "edges"])
 def test_comparison_plots_use_clear_labels_without_mutating_results(plotter, analyze, what):
