@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from itertools import combinations
-from typing import Dict, Iterable, Iterator, Mapping, Optional, Sequence, Tuple, Union
+from typing import Dict, Iterable, Iterator, Mapping, NamedTuple, Optional, Sequence, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -127,8 +127,19 @@ def _prepare_network(item: object) -> _PreparedNetwork:
     return _PreparedNetwork(adj.index, adjacency=adj)
 
 
+class _SparseEdges(NamedTuple):
+    """Union-edge coordinates and nonzero observations in network order."""
+
+    sources: np.ndarray
+    targets: np.ndarray
+    groups: np.ndarray
+    weights: np.ndarray
+    counts: np.ndarray
+    offsets: np.ndarray
+
+
 class PreparedNetworks(Mapping[str, _PreparedNetwork]):
-    """Validated networks with edge lists and a lazily cached adjacency tensor.
+    """Validated networks with lazy sparse coordinates and an adjacency tensor.
 
     Usually created with :func:`prepare_networks`. Network names can be inspected
     like a mapping, but entries cannot be replaced or removed. Treat the values
@@ -147,6 +158,8 @@ class PreparedNetworks(Mapping[str, _PreparedNetwork]):
             node for net in self._networks.values() for node in net.nodes
         ))
         self._adjacency_tensor: Optional[np.ndarray] = None
+        self._sparse_edges: Optional[_SparseEdges] = None
+        self._auto_backend: Optional[str] = None
 
     def __getitem__(self, name: str) -> _PreparedNetwork:
         return self._networks[name]
@@ -186,6 +199,38 @@ class PreparedNetworks(Mapping[str, _PreparedNetwork]):
             tensor.setflags(write=False)
             self._adjacency_tensor = tensor
         return self._adjacency_tensor
+
+    def _edge_coordinates(self) -> _SparseEdges:
+        if self._sparse_edges is None:
+            nodes = pd.Index(self.node_names)
+            edge_ids, weights, lengths = [], [], []
+            for network in self.values():
+                edges = network.edges()
+                edge_ids.append(nodes.get_indexer(edges["from"]) * len(nodes)
+                                + nodes.get_indexer(edges["to"]))
+                weights.append(edges["weight"].to_numpy())
+                lengths.append(len(edges))
+            ids, groups = np.unique(np.concatenate(edge_ids), return_inverse=True)
+            sources, targets = np.divmod(ids, max(1, len(nodes)))
+            self._sparse_edges = _SparseEdges(
+                sources, targets, groups, np.concatenate(weights),
+                np.bincount(groups, minlength=len(ids)),
+                np.concatenate(([0], np.cumsum(lengths))),
+            )
+            for array in self._sparse_edges:
+                array.setflags(write=False)
+        return self._sparse_edges
+
+    def _rewiring_backend(self) -> str:
+        if self._auto_backend is None:
+            cells = len(self) * len(self.node_names) ** 2
+            nonzero = sum(len(net._edges) if net._edges is not None
+                          else np.count_nonzero(net._adjacency.to_numpy())
+                          for net in self.values())
+            # Keep tiny inputs on the existing dense path. Sparse coordinates
+            # can use more memory than a dense tensor at high density.
+            self._auto_backend = "sparse" if cells >= 100000 and nonzero <= 0.1 * cells else "dense"
+        return self._auto_backend
 
 
 def prepare_networks(input_list: Union[Mapping[str, object], Sequence[object]]) -> PreparedNetworks:
@@ -280,11 +325,38 @@ def _indata_to_edgelist(ingraph: pd.DataFrame) -> pd.DataFrame:
 def rewiring_analysis(
     matrix_list: Union[Mapping[str, object], Sequence[object]],
     structure_only: bool = False,
+    *,
+    backend: str = "auto",
 ) -> pd.DataFrame:
+    """Calculate rewiring using sparse edges or an aligned dense NumPy tensor.
+
+    ``auto`` selects sparse storage at <=10% density and at least 100,000 tensor
+    cells; otherwise it selects dense storage. Explicit ``sparse`` and ``dense``
+    choices override selection. Sparse calculation includes absent edges as zeros
+    without storing them, and preserves the same output columns and node order.
+    """
+    if backend not in {"auto", "sparse", "dense"}:
+        raise ValueError("backend must be 'auto', 'sparse', or 'dense'")
     networks = prepare_networks(matrix_list)
     if len(networks) < 2:
         raise ValueError("rewiring_analysis requires at least two input networks.")
+    if backend == "auto":
+        backend = networks._rewiring_backend()
+    if backend == "sparse":
+        rewiring, degree = _sparse_rewiring(networks, structure_only)
+    else:
+        rewiring, degree = _dense_rewiring(networks, structure_only)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        corrected = rewiring / degree
+    return pd.DataFrame({
+        "name": pd.Index(networks.node_names),
+        "rewiring": rewiring,
+        "degree": degree,
+        "degree_corrected_rewiring": corrected,
+    })
 
+
+def _dense_rewiring(networks: PreparedNetworks, structure_only: bool) -> tuple[np.ndarray, np.ndarray]:
     tensor = networks.adjacency_tensor()
     matrices = tensor != 0 if structure_only else tensor
     counts = np.count_nonzero(matrices, axis=0)
@@ -308,14 +380,67 @@ def rewiring_analysis(
 
         union = np.any(matrices > 0, axis=0)
         degree = (union.sum(axis=0) + union.sum(axis=1) - np.diag(union)).astype(float)
-        corrected = rewiring / degree
+    return rewiring, degree
 
-    return pd.DataFrame({
-        "name": pd.Index(networks.node_names),
-        "rewiring": rewiring,
-        "degree": degree,
-        "degree_corrected_rewiring": corrected,
-    })
+
+def _incident_sums(edges: _SparseEdges, values: np.ndarray, node_count: int) -> np.ndarray:
+    loops = edges.sources == edges.targets
+    return (np.bincount(edges.sources, weights=values, minlength=node_count)
+            + np.bincount(edges.targets, weights=values, minlength=node_count)
+            - np.bincount(edges.sources[loops], weights=values[loops], minlength=node_count))
+
+
+def _sparse_rewiring(networks: PreparedNetworks, structure_only: bool) -> tuple[np.ndarray, np.ndarray]:
+    edges = networks._edge_coordinates()
+    count = len(networks)
+    node_count = len(networks.node_names)
+    if not len(edges.counts):
+        return np.zeros(node_count), np.zeros(node_count)
+    missing = count - edges.counts
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        if structure_only:
+            centers = edges.counts / count
+            edge_variance = edges.counts * (1.0 - centers) ** 2 + missing * centers**2
+            positive = np.ones(len(edges.counts), dtype=bool)
+        else:
+            means = np.bincount(edges.groups, weights=edges.weights,
+                                minlength=len(edges.counts)) / edges.counts
+            means[~np.isfinite(means)] = 0.0
+            standardized = edges.weights / means[edges.groups]
+            centers = np.bincount(edges.groups, weights=standardized,
+                                  minlength=len(edges.counts)) / count
+            # Center before squaring to avoid cancellation from E[x²] - E[x]².
+            squared = (standardized - centers[edges.groups]) ** 2
+            edge_variance = np.bincount(edges.groups, weights=squared,
+                                        minlength=len(edges.counts)) + missing * centers**2
+            positive = np.bincount(edges.groups, weights=edges.weights > 0,
+                                   minlength=len(edges.counts)) > 0
+
+        totals = _incident_sums(edges, edge_variance, node_count)
+        if not structure_only and not np.isfinite(totals).all():
+            # Signed cancellation and overflow have established NaN/Inf behavior.
+            # Handle those rare cases one network at a time, still without N² data.
+            totals = _sparse_nonfinite_totals(edges, standardized, centers, node_count)
+        rewiring = totals / (count - 1)
+        degree = _incident_sums(edges, positive, node_count)
+    return rewiring, degree
+
+
+def _sparse_nonfinite_totals(
+    edges: _SparseEdges, standardized: np.ndarray, centers: np.ndarray, node_count: int,
+) -> np.ndarray:
+    totals = np.zeros(node_count)
+    loops = edges.sources == edges.targets
+    diagonal = np.zeros(node_count)
+    for start, stop in zip(edges.offsets[:-1], edges.offsets[1:]):
+        squared = centers**2  # Every absent observation is zero before centering.
+        groups = edges.groups[start:stop]
+        squared[groups] = (standardized[start:stop] - centers[groups]) ** 2
+        diagonal[edges.sources[loops]] = squared[loops]
+        squared[np.isnan(squared)] = 0.0
+        totals += (np.bincount(edges.sources, weights=squared, minlength=node_count)
+                   + np.bincount(edges.targets, weights=squared, minlength=node_count) - diagonal)
+    return totals
 
 
 def rewiring_plot(

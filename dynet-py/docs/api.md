@@ -15,9 +15,9 @@
 
 Call `prepare_networks(raw_inputs)` once and reuse its `PreparedNetworks` result
 with the functions above. Prepared collections pass through without reparsing;
-edge lists and an aligned 3D NumPy adjacency array are cached when needed. The
-collection is a read-only mapping of network names to opaque values. Existing raw-input calls
-still work, but each separate call prepares those raw inputs again.
+edge coordinates and an aligned 3D NumPy adjacency array are cached when needed.
+The collection is a read-only mapping of network names to opaque values. Existing
+raw-input calls still work, but each separate call prepares those raw inputs again.
 
 Preparation guarantees string names and node labels, finite `float64` weights,
 and square matrices with aligned row/column labels. Numeric strings are accepted;
@@ -32,9 +32,25 @@ raw inputs and are skipped when reusing the prepared collection.
 array with shape `(number_of_networks, number_of_nodes, number_of_nodes)`. The
 network axis follows the collection's iteration order. The source and target axes
 both follow `PreparedNetworks.node_names`, a tuple containing the union of node
-labels in first-seen order. Missing nodes are zero-filled. Rewiring operates on
-this array; edge-based calculations and plots do not require it. Use `.copy()` to
-get writable data. `format_indata` retains its list-of-DataFrames return format.
+labels in first-seen order. Missing nodes are zero-filled. Dense rewiring operates
+on this array; sparse rewiring and edge-based calculations and plots do not
+require it. Use `.copy()` to get writable data. `format_indata` retains its
+list-of-DataFrames return format.
+
+`rewiring_analysis(networks, structure_only=False, *, backend="auto")` accepts:
+
+- `sparse`: reuse cached edge coordinates and compute variance including implicit
+  zero observations, without allocating a dense matrix. Storage grows with the
+  observed edges and node count. No SciPy dependency is required.
+- `dense`: reuse the aligned adjacency tensor.
+- `auto` (default): select sparse when the tensor has at least 100,000 cells and
+  at most 10% nonzero entries; otherwise select dense. Density is measured against
+  the union of node labels across all networks, after duplicate aggregation.
+
+Both backends preserve the same outputs and support structural rewiring. Sparse
+variance uses a centered second pass to avoid subtracting nearly equal squared
+moments. Signed-weight cancellation and overflow use a bounded-memory fallback
+that preserves the established NaN/Inf behavior. This fallback may be slower.
 
 ### Draft API helpers
 

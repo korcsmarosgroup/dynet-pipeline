@@ -39,6 +39,8 @@ in a supplied weight column are errors, while omitting that column defaults to 1
 
 - `--out-dir`: output directory (default `dynet_py_results`)
 - `--structure-only`: compute structural rewiring only
+- `--backend`: `auto` (default), `sparse`, or `dense`; auto selects sparse for
+  at least 100,000 aligned tensor cells with at most 10% nonzero entries
 - `--focus-node`: node to highlight in small multiples plot
 
 ## Example Commands
@@ -46,6 +48,7 @@ in a supplied weight column are errors, while omitting that column defaults to 1
 ```bash
 dynet-py --edge-lists net_t1.csv net_t2.csv --out-dir results
 dynet-py --input-csv input_edges.csv --structure-only --out-dir results_structure
+dynet-py --input-csv input_edges.csv --backend sparse --out-dir results_sparse
 ```
 
 ## Generated Outputs

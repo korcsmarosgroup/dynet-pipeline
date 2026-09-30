@@ -182,11 +182,32 @@ structural comparisons. Jaccard compares labeled directed edges, so node orderin
 and different node sets are handled correctly.
 
 For edge-list inputs, targeting, Jaccard, and plotting operate on normalized edges
-without allocating dense adjacency matrices. Rewiring builds one cached NumPy
-array shaped `(networks, nodes, nodes)`, aligned to the union of node labels, and
-performs its calculations over the whole array. Edge-list inputs populate this
-array directly, without intermediate DataFrame matrices. The CLI automatically
-reuses prepared networks.
+without allocating dense adjacency matrices. Rewiring now supports two backends:
+
+```python
+res = rewiring_analysis(networks)                    # backend="auto"
+sparse_res = rewiring_analysis(networks, backend="sparse")
+dense_res = rewiring_analysis(networks, backend="dense")
+```
+
+- `sparse` caches coordinates for observed edges and calculates per-edge variance
+  directly. Missing edges count as zero without being stored. Contributions are
+  summed at each endpoint, counting self-loops once; isolated nodes are retained.
+  Its storage scales with observed edges and nodes, without a dense adjacency
+  tensor or a SciPy dependency.
+- `dense` builds a cached NumPy array shaped `(networks, nodes, nodes)`, aligned
+  to the union of node labels, and calculates over that array.
+- `auto` uses sparse storage when the aligned tensor would contain at least
+  100,000 cells and at most 10% of those cells are nonzero; otherwise it uses
+  dense storage. This is a conservative heuristic, not a universal performance
+  guarantee. Both backends can be selected explicitly and preserve the output
+  columns and node order.
+
+Both backends support `structure_only=True`. Sparse calculations retain the
+existing NaN/Inf behavior for signed-weight cancellation and overflow, using a
+slower calculation one network at a time for these exceptional cases, without
+allocating dense matrices. The CLI supports `--backend auto|sparse|dense` and
+automatically reuses prepared inputs.
 
 The aligned array and its labels are also available explicitly:
 
@@ -200,7 +221,7 @@ Nodes absent from a network have zero rows and columns. Repeated calls return th
 same cached array; use `adjacency.copy()` to obtain a writable copy. Structural
 rewiring does not change the cached weights. Dense storage scales with the number
 of networks times the square of the total node count, so this array is only
-allocated when requested or needed for rewiring.
+allocated when requested or when using the dense rewiring backend.
 
 For compatibility, `format_indata` still returns a list of per-network DataFrame
 matrices with their original node sets. These are copies, so editing an exported

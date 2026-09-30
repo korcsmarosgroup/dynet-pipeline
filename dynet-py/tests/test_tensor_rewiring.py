@@ -56,10 +56,11 @@ def _case_inputs(case):
 
 @pytest.mark.parametrize("case", ["empty", "isolates", "cancellation", "overflow", "mixed", 0, 1, 2, 3, 4])
 @pytest.mark.parametrize("structure_only", [False, True])
-def test_tensor_rewiring_matches_previous_calculation(case, structure_only):
+@pytest.mark.parametrize("backend", ["dense", "sparse", "auto"])
+def test_tensor_rewiring_matches_previous_calculation(case, structure_only, backend):
     inputs = _case_inputs(case)
     expected = _dataframe_reference(inputs, structure_only)
-    actual = rewiring_analysis(inputs, structure_only=structure_only)
+    actual = rewiring_analysis(inputs, structure_only=structure_only, backend=backend)
     pd.testing.assert_frame_equal(actual, expected, rtol=1e-12, atol=1e-12)
 
 

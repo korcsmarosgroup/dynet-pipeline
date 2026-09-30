@@ -35,6 +35,12 @@ def _parse_args() -> argparse.Namespace:
         help="Run structure-only (unweighted) rewiring analysis.",
     )
     parser.add_argument(
+        "--backend",
+        choices=("auto", "sparse", "dense"),
+        default="auto",
+        help="Rewiring storage: auto selects by density and estimated tensor size.",
+    )
+    parser.add_argument(
         "--focus-node",
         default=None,
         help="Focus node used for small multiples plot (defaults to top rewired node).",
@@ -75,7 +81,7 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    rewiring = rewiring_analysis(networks, structure_only=args.structure_only)
+    rewiring = rewiring_analysis(networks, structure_only=args.structure_only, backend=args.backend)
     rewiring.to_csv(out_dir / "dynet_py_output.csv", index=False)
 
     targeting = compare_targeting(networks)
