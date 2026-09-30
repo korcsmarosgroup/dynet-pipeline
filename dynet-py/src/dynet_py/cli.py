@@ -57,6 +57,11 @@ def _load_edge_list(path: Path) -> pd.DataFrame:
 
 
 def main() -> None:
+    """Run standardized rewiring, targeting, and network plots from CSV inputs.
+
+    This CLI entry point uses ``rewiring_analysis``. The legacy Python function
+    ``dynet_main`` belongs to the separate condition-comparison workflow.
+    """
     args = _parse_args()
     if bool(args.edge_lists) == bool(args.input_csv):
         raise ValueError("Provide exactly one of --edge-lists or --input-csv.")

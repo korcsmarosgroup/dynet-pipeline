@@ -4,7 +4,19 @@
 
 It installs the Python import package `dynet_py` and the CLI command `dynet-py`.
 
-It exposes the main API:
+Choose the workflow for the result you need:
+
+| Result | Prepare inputs | Analyze | Plot |
+| --- | --- | --- | --- |
+| Standardized per-node rewiring scores | `prepare_networks` | `rewiring_analysis` | `rewiring_plot` |
+| Gained/lost edges and node degree changes between conditions | `prepare_condition_data` | `compare_conditions` or `compare_condition_pair` | `plot_condition_changes` |
+
+These are different calculations. Condition comparisons report
+`degree_change_score = abs(delta_degree) + abs(delta_weight_degree)`; this can be
+zero even when neighbors change. `rewiring_analysis` measures standardized
+edge-weight variation across networks and produces the `rewiring` column.
+
+The rewiring-score workflow also exposes:
 
 - `prepare_networks`
 - `format_indata`
@@ -14,14 +26,19 @@ It exposes the main API:
 - `calculate_jaccard_indices`
 - `compare_targeting`
 
-It also keeps the earlier draft API:
+The earlier names remain available for compatibility:
 
-- `package_data`
-- `package_data_rename`
-- `package_data_remap`
-- `dynet_internal`
-- `dynet_main`
-- `dynet_plot`
+- `package_data`: historical condition-table preparation; use the strict
+  `prepare_condition_data` for new code.
+- `dynet_internal`: one condition comparison; use `compare_condition_pair`.
+- `dynet_main`: multiple condition comparisons; use `compare_conditions`.
+- `dynet_plot`: plot a legacy comparison result; use `plot_condition_changes`
+  with new comparison results.
+- `package_data_rename` and `package_data_remap`: column/label utilities.
+
+`dynet_main` never calls `rewiring_analysis`. Its historical `rewiring_score`
+column is the degree-change heuristic, retained only for compatibility. See the
+[API reference](docs/api.md) for input formats, return values, and migration notes.
 
 ## Install
 
@@ -78,7 +95,7 @@ Build static docs:
 mkdocs build --strict
 ```
 
-## Minimal usage (`rewiring_analysis`-style)
+## Minimal usage (standardized rewiring scores)
 
 ```python
 import pandas as pd
@@ -129,11 +146,11 @@ Output files:
 - `dynet_py_plot.png`
 - `small_multiples_plot.png`
 
-## Minimal usage (draft API)
+## Minimal usage (condition comparisons)
 
 ```python
 import pandas as pd
-from dynet_py import package_data, dynet_main, dynet_plot
+from dynet_py import prepare_condition_data, compare_conditions, plot_condition_changes
 
 raw = pd.DataFrame(
     {
@@ -144,10 +161,15 @@ raw = pd.DataFrame(
     }
 )
 
-packed = package_data(raw, source="src", target="dst", condition="cond", weight="w")
-out = dynet_main(packed)
-fig = dynet_plot(out, what="edges")
+condition_data = prepare_condition_data(raw, source="src", target="dst", condition="cond", weight="w")
+changes = compare_conditions(condition_data, conditions=["T0", "T1"])
+fig = plot_condition_changes(changes, what="edges")
 ```
+
+This returns gained/lost/kept edges and degree-change tables. It does not calculate
+the standardized rewiring scores shown in the earlier example. Condition-table
+rows define edge presence, even at zero weight; the rewiring-score workflow uses
+nonzero weights to define edge presence.
 
 ## Reuse prepared networks
 

@@ -9,6 +9,12 @@ It supports:
 - plotting functions for network rewiring summaries
 - a command-line interface for CSV-based workflows
 
+For standardized scores, start with `prepare_networks` and `rewiring_analysis`.
+For gained/lost edges and degree changes, use `prepare_condition_data` and
+`compare_conditions`. These are different metrics; the historical `dynet_main`
+name refers only to the second workflow. See [API Reference](api.md) for the
+input/output formats and compatibility names.
+
 ## Who This Is For
 
 - Researchers comparing network structure across conditions or time points

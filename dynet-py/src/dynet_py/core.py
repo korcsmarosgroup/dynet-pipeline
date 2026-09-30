@@ -1,9 +1,19 @@
+"""Network scoring and condition comparisons are separate analysis workflows.
+
+Use prepare_networks -> rewiring_analysis -> rewiring_plot for standardized
+per-node rewiring scores. Use prepare_condition_data -> compare_conditions ->
+plot_condition_changes for edge turnover and degree changes. Legacy dynet_*
+entry points wrap the second workflow; they do not invoke the score calculator.
+"""
+
 from __future__ import annotations
 
 from itertools import combinations
 from typing import Dict, Iterable, Iterator, Mapping, NamedTuple, Optional, Sequence, Tuple, Union
 
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 import numpy as np
 import pandas as pd
 
@@ -243,6 +253,23 @@ def prepare_networks(input_list: Union[Mapping[str, object], Sequence[object]]) 
     tensor only when needed. An existing PreparedNetworks collection is returned
     unchanged, without inspecting or normalizing its networks again. Call this on
     the raw inputs again after editing them to create a new snapshot.
+
+    Args:
+        input_list: Named mapping or sequence of edge-list DataFrames with
+            ``from``, ``to``, and optional ``weight`` columns, square adjacency
+            DataFrames/arrays, graph-like objects, or already prepared networks.
+
+    Returns:
+        A reusable read-only mapping for ``rewiring_analysis``, targeting,
+            Jaccard, and network plots. Names follow mapping order or start at "1"
+            for sequence inputs; node labels are strings and weights are float64.
+
+    Raises:
+        ValueError: A network has invalid weights, labels, or matrix dimensions.
+
+    Note:
+        For one table with a ``condition`` column and edge-change comparisons,
+        use ``prepare_condition_data`` instead.
     """
     if isinstance(input_list, PreparedNetworks):
         return input_list
@@ -307,6 +334,19 @@ def _coerce_to_adjacency_matrix(item: object) -> pd.DataFrame:
 def format_indata(
     input_list: Union[Mapping[str, object], Sequence[object]],
 ) -> list[pd.DataFrame]:
+    """Export independent labeled adjacency DataFrames for each network.
+
+    Args:
+        input_list: Raw or prepared networks accepted by ``prepare_networks``.
+
+    Returns:
+        Copies of per-network square matrices in input order, retaining each
+            network's own node set. Editing a copy does not change prepared data.
+
+    Note:
+        This compatibility/export function materializes dense matrices. Use
+        ``prepare_networks`` to reuse inputs without requiring dense storage.
+    """
     return [network.adjacency().copy() for network in prepare_networks(input_list).values()]
 
 
@@ -328,12 +368,35 @@ def rewiring_analysis(
     *,
     backend: str = "auto",
 ) -> pd.DataFrame:
-    """Calculate rewiring using sparse edges or an aligned dense NumPy tensor.
+    """Calculate per-node standardized rewiring scores across multiple networks.
 
-    ``auto`` selects sparse storage at <=10% density and at least 100,000 tensor
-    cells; otherwise it selects dense storage. Explicit ``sparse`` and ``dense``
-    choices override selection. Sparse calculation includes absent edges as zeros
-    without storing them, and preserves the same output columns and node order.
+    Each directed edge is divided by its mean nonzero weight across networks.
+    Its sample variance (including absent edges as zeros) contributes to both
+    endpoint scores, with self-loops counted once. This is the score calculator
+    used by the CLI and ``rewiring_plot``.
+
+    Args:
+        matrix_list: At least two raw or prepared networks accepted by
+            ``prepare_networks``. Edge lists are supported despite this
+            historical parameter name.
+        structure_only: Replace all nonzero weights by 1 before scoring.
+        backend: ``sparse``, ``dense``, or ``auto``. Auto chooses sparse at <=10%
+            density and >=100,000 aligned tensor cells; otherwise dense.
+
+    Returns:
+        A DataFrame with ``name``, ``rewiring``, ``degree``, and
+            ``degree_corrected_rewiring`` (rewiring divided by degree). Degree counts
+            incident edges in the positive-weight union, or the nonzero union in
+            structural mode, with self-loops counted once. Node order follows the
+            prepared union; zero degree or signed-weight cancellation can yield
+            NaN/Inf values.
+
+    Raises:
+        ValueError: Fewer than two networks, an unknown backend, or invalid input.
+
+    Note:
+        ``compare_conditions`` reports gained/lost edges and a separate
+        ``degree_change_score``. It does not call this calculator.
     """
     if backend not in {"auto", "sparse", "dense"}:
         raise ValueError("backend must be 'auto', 'sparse', or 'dense'")
@@ -447,7 +510,22 @@ def rewiring_plot(
     matrix_list: Union[Mapping[str, object], Sequence[object]],
     output_dataframe: pd.DataFrame,
     structure_only: bool = False,
-):
+) -> Figure:
+    """Plot a network union colored by scores from ``rewiring_analysis``.
+
+    Args:
+        matrix_list: The raw or prepared networks used to calculate the scores.
+        output_dataframe: Score table with ``name``, ``rewiring``, and ``degree``
+            columns. A condition-comparison result is not a score table.
+        structure_only: Include all nonzero edges, including negative weights.
+            Otherwise include positive edges only. Match the scoring mode.
+
+    Returns:
+        A matplotlib Figure with a circular layout, undirected union edges,
+            node color representing rewiring, and node size representing degree.
+            Missing node scores default to zero. This function does not recalculate
+            scores; use ``plot_condition_changes`` for condition-comparison bars.
+    """
     networks = prepare_networks(matrix_list)
     node_names = networks.node_names
     node_order = {node: i for i, node in enumerate(node_names)}
@@ -492,7 +570,22 @@ def small_multiples_plot(
     input_list: Union[Mapping[str, object], Sequence[object]],
     focus_node: str,
     mode: str = "focus_only",
-):
+) -> Figure:
+    """Draw one directed network panel per input, highlighting a focal node.
+
+    Args:
+        input_list: Raw or prepared networks accepted by ``prepare_networks``.
+        focus_node: Node label to highlight, converted to a string.
+        mode: ``focus_only`` includes only edges incident to the focal node;
+            ``r_compat`` includes all nonzero edges in each network.
+
+    Returns:
+        A matplotlib Figure. An absent or isolated focal node is still shown.
+            Panels show edge presence, not rewiring scores or edge-weight magnitude.
+
+    Raises:
+        ValueError: The mode is not recognized or a network input is invalid.
+    """
     networks = prepare_networks(input_list)
     focus_node = str(focus_node)
 
@@ -559,6 +652,17 @@ def small_multiples_plot(
 def calculate_jaccard_indices(
     networks: Union[Mapping[str, object], Sequence[object]],
 ) -> pd.DataFrame:
+    """Compare all networks by overlap of labeled, directed, nonzero edges.
+
+    Args:
+        networks: Raw or prepared networks accepted by ``prepare_networks``.
+
+    Returns:
+        A symmetric DataFrame indexed and column-labeled by network name. Each
+            entry is intersection size divided by union size; two empty networks
+            have similarity 1. Weight magnitude and sign do not affect presence.
+            Opposite edge directions are distinct, and isolated nodes do not count.
+    """
     prepared = prepare_networks(networks)
     names = list(prepared)
     edge_sets = [set(net.edges()[["from", "to"]].itertuples(index=False, name=None))
@@ -577,6 +681,19 @@ def calculate_jaccard_indices(
 def compare_targeting(
     input_list: Union[Mapping[str, object], Sequence[object]],
 ) -> pd.DataFrame:
+    """Compare each shared node's sum of incoming weights for every network pair.
+
+    Args:
+        input_list: Raw or prepared networks accepted by ``prepare_networks``.
+
+    Returns:
+        A DataFrame with ``name``, ``compared_networks``, ``targetingNet1``,
+            ``targetingNet2``, ``deltaTargeting`` (absolute difference), and
+            ``log2TargetingFC`` (log2 of first/second). Only nodes present in both
+            networks of a pair are compared. Pair IDs use input positions, such as
+            "1_vs_2"; targeting columns retain string values for compatibility.
+            Zero or negative sums can produce NaN/Inf fold changes.
+    """
     formatted = prepare_networks(input_list)
 
     targeting_frames: list[pd.DataFrame] = []
@@ -652,6 +769,24 @@ def package_data_rename(
     condition: str,
     weight: Optional[str] = None,
 ) -> pd.DataFrame:
+    """Select and rename columns for the condition-comparison table format.
+
+    Args:
+        data: Input edge table.
+        source: Column containing source nodes.
+        target: Column containing target nodes.
+        condition: Column containing condition labels.
+        weight: Weight column to rename. If omitted, an existing ``weight``
+            column is retained, or weights default to 1.
+
+    Returns:
+        A copy with ``source``, ``target``, ``condition``, and ``weight`` columns.
+            This low-level compatibility helper does not validate or aggregate data;
+            prefer ``prepare_condition_data`` for a complete preparation step.
+
+    Raises:
+        ValueError: A requested column is absent.
+    """
     cols = [source, target, condition] + ([weight] if weight else [])
     missing = [c for c in cols if c not in data.columns]
     if missing:
@@ -674,6 +809,23 @@ def package_data_remap(
     remap: Union[Dict[str, str], pd.DataFrame],
     columns: Sequence[str] = ("source", "target"),
 ) -> pd.DataFrame:
+    """Return a condition-edge table with selected node labels remapped.
+
+    Args:
+        data: Usually the result of ``prepare_condition_data``.
+        remap: Old-to-new label mapping, or a DataFrame whose first two columns
+            give old and new labels. Labels are compared as strings.
+        columns: Columns to remap; defaults to ``source`` and ``target``.
+
+    Returns:
+        A copy retaining labels not present in the mapping. This compatibility
+            helper does not aggregate newly duplicated edges; prepare the remapped
+            table again before comparing conditions.
+
+    Raises:
+        ValueError: A selected column is absent or the remapping table has fewer
+            than two columns.
+    """
     out = data.copy()
 
     if isinstance(remap, pd.DataFrame):
@@ -691,6 +843,56 @@ def package_data_remap(
     return out
 
 
+def prepare_condition_data(
+    data: pd.DataFrame,
+    source: str = "source",
+    target: str = "target",
+    condition: str = "condition",
+    weight: Optional[str] = None,
+    directed: bool = True,
+    drop_self_loops: bool = True,
+    aggregator: str = "sum",
+) -> pd.DataFrame:
+    """Prepare one condition-labeled edge table for condition comparisons.
+
+    Args:
+        data: Table containing node and condition columns.
+        source: Source-node column name.
+        target: Target-node column name.
+        condition: Condition column name.
+        weight: Weight column name. If omitted, retain an existing ``weight``
+            column or default to 1.
+        directed: If false, sort each pair of endpoints so reverse edges merge.
+        drop_self_loops: Remove edges whose endpoints are identical by default.
+        aggregator: Combine duplicate condition/source/target rows with ``sum``,
+            ``mean``, ``max``, or ``min``.
+
+    Returns:
+        A DataFrame with ``condition``, ``source``, ``target``, and ``weight``
+            columns, sorted by the grouping keys. Labels are strings and weights are
+            finite float64. Zero-weight rows are retained: condition comparisons
+            define edge presence by rows, not by nonzero weights.
+
+    Raises:
+        ValueError: Invalid columns, labels, weights, aggregation, or overflow.
+
+    Note:
+        This table feeds ``compare_conditions`` or ``compare_condition_pair``.
+        For standardized rewiring scores, use ``prepare_networks`` with separate
+        networks instead. Unlike legacy ``package_data``, this function rejects
+        invalid weights instead of silently replacing them with zero.
+    """
+    out = package_data_rename(data, source, target, condition, weight)
+    labels = _normalize_labels(list(out["source"]) + list(out["target"]), "Node labels", unique=False)
+    out["source"], out["target"] = labels[:len(out)], labels[len(out):]
+    out["condition"] = _normalize_labels(out["condition"], "Condition labels", unique=False)
+    out["weight"] = _normalize_weights(out["weight"])
+    out = _aggregate_condition_edges(out, directed, drop_self_loops, aggregator)
+    if not np.isfinite(out["weight"].to_numpy()).all():
+        raise ValueError("Aggregated edge weights must be finite.")
+    return out
+
+
 def package_data(
     data: pd.DataFrame,
     source: str = "source",
@@ -701,10 +903,24 @@ def package_data(
     drop_self_loops: bool = True,
     aggregator: str = "sum",
 ) -> pd.DataFrame:
+    """Legacy preparation for condition comparisons; prefer ``prepare_condition_data``.
+
+    Arguments and output columns match ``prepare_condition_data``. This wrapper
+    preserves historical preprocessing: labels are stringified and missing or
+    nonnumeric weights become zero. It does not create ``PreparedNetworks`` and
+    does not calculate standardized rewiring scores. New code should use the
+    strict preparation function; valid existing calls remain supported.
+    """
     out = package_data_rename(data, source, target, condition, weight)
     out[["source", "target", "condition"]] = out[["source", "target", "condition"]].astype(str)
     out["weight"] = pd.to_numeric(out["weight"], errors="coerce").fillna(0.0)
+    return _aggregate_condition_edges(out, directed, drop_self_loops, aggregator)
 
+
+def _aggregate_condition_edges(
+    out: pd.DataFrame, directed: bool, drop_self_loops: bool, aggregator: str,
+) -> pd.DataFrame:
+    """Apply condition-table grouping after the caller's chosen validation policy."""
     if drop_self_loops:
         out = out[out["source"] != out["target"]].copy()
 
@@ -725,10 +941,12 @@ def package_data(
 
 
 def _edge_set(df: pd.DataFrame) -> set:
+    """Return directed row membership, including zero-weight condition edges."""
     return set(zip(df["source"], df["target"]))
 
 
 def _degree_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Count incident rows and signed weight sums; self-loops contribute twice."""
     src = df.groupby("source", as_index=False).agg(out_degree=("target", "size"), out_weight=("weight", "sum"))
     src = src.rename(columns={"source": "node"})
     tgt = df.groupby("target", as_index=False).agg(in_degree=("source", "size"), in_weight=("weight", "sum"))
@@ -739,11 +957,54 @@ def _degree_table(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def dynet_internal(
+def _condition_names(data: pd.DataFrame) -> list[str]:
+    """Check the condition-table schema and retain label appearance order."""
+    if not isinstance(data, pd.DataFrame) or not {"source", "target", "condition", "weight"}.issubset(data.columns):
+        raise ValueError("Expected a condition-edge table from prepare_condition_data(); "
+                         "use rewiring_analysis() for prepared networks.")
+    return list(data["condition"].unique())
+
+
+def compare_condition_pair(
     data: pd.DataFrame,
     condition_a: str,
     condition_b: str,
 ) -> Dict[str, Union[pd.DataFrame, dict, str]]:
+    """Compare edge membership and node degrees between two conditions.
+
+    Args:
+        data: Condition-edge table from ``prepare_condition_data``.
+        condition_a: Baseline condition label.
+        condition_b: Comparison condition label; changes are B minus A.
+
+    Returns:
+        A dictionary with ``comparison``, ``edge_changes``, ``node_changes``,
+            and ``summary``. Edges are labeled ``gained``, ``lost``, or ``kept``.
+            Nodes are ranked by ``degree_change_score`` = abs(delta_degree) +
+            abs(delta_weight_degree), where weighted degree is the signed sum of
+            incoming and outgoing weights. Retained self-loops count twice in degree.
+
+    Raises:
+        ValueError: The table schema is wrong or conditions are absent/equal.
+
+    Note:
+        This degree-change heuristic is not the standardized ``rewiring`` score
+        from ``rewiring_analysis``. It can be zero even if neighbors change.
+        Edge membership follows table rows, including rows with zero weight.
+    """
+    names = _condition_names(data)
+    condition_a, condition_b = str(condition_a), str(condition_b)
+    if condition_a == condition_b or condition_a not in names or condition_b not in names:
+        raise ValueError("Choose two distinct condition labels present in the prepared table.")
+    return _compare_condition_pair(data, condition_a, condition_b)
+
+
+def _compare_condition_pair(
+    data: pd.DataFrame,
+    condition_a: str,
+    condition_b: str,
+) -> Dict[str, Union[pd.DataFrame, dict, str]]:
+    """Calculate edge/degree changes after condition selection has been validated."""
     df_a = data[data["condition"] == condition_a][["source", "target", "weight"]].copy()
     df_b = data[data["condition"] == condition_b][["source", "target", "weight"]].copy()
 
@@ -793,8 +1054,8 @@ def dynet_internal(
     node_changes["delta_weight_degree"] = (
         node_changes[f"weight_degree_{condition_b}"] - node_changes[f"weight_degree_{condition_a}"]
     )
-    node_changes["rewiring_score"] = node_changes["delta_degree"].abs() + node_changes["delta_weight_degree"].abs()
-    node_changes = node_changes.sort_values("rewiring_score", ascending=False).reset_index(drop=True)
+    node_changes["degree_change_score"] = node_changes["delta_degree"].abs() + node_changes["delta_weight_degree"].abs()
+    node_changes = node_changes.sort_values("degree_change_score", ascending=False).reset_index(drop=True)
 
     summary = {
         "condition_a": condition_a,
@@ -815,18 +1076,44 @@ def dynet_internal(
     }
 
 
-def dynet_main(
+def compare_conditions(
     data: pd.DataFrame,
     conditions: Optional[Iterable[str]] = None,
     pairwise: str = "adjacent",
-) -> Dict[str, Union[list, dict]]:
+) -> Dict[str, Union[list, pd.DataFrame]]:
+    """Run edge/degree-change comparisons for selected pairs of conditions.
+
+    Args:
+        data: Condition-edge table returned by ``prepare_condition_data``.
+        conditions: Ordered labels to compare. Defaults to first appearance in
+            ``data``; supply temporal order explicitly if it matters.
+        pairwise: ``adjacent`` compares neighboring labels in that order;
+            ``all`` compares every unordered pair, with earlier labels as A.
+
+    Returns:
+        A dictionary with ``comparisons`` (one ``compare_condition_pair`` result
+            per pair) and ``edge_counts`` (a summary DataFrame). Pass it to
+            ``plot_condition_changes``. Node tables use ``degree_change_score``.
+
+    Raises:
+        ValueError: Invalid table schema, fewer than two conditions, unknown or
+            duplicate condition labels, or an unsupported pairwise mode.
+
+    Note:
+        This orchestrates condition comparisons only. It does not call
+        ``rewiring_analysis`` and its heuristic is not a rewiring-score estimate.
+        The legacy name ``dynet_main`` was not a main entry point for scoring.
+    """
+    available = _condition_names(data)
     if conditions is None:
-        conditions = list(data["condition"].dropna().astype(str).unique())
+        conditions = available
     else:
-        conditions = [str(c) for c in conditions]
+        conditions = _normalize_labels(conditions, "Condition names")
 
     if len(conditions) < 2:
         raise ValueError("At least two conditions are required")
+    if any(condition not in available for condition in conditions):
+        raise ValueError("All condition labels must be present in the prepared table.")
 
     if pairwise not in {"adjacent", "all"}:
         raise ValueError("pairwise must be 'adjacent' or 'all'")
@@ -837,7 +1124,7 @@ def dynet_main(
     else:
         pairs = list(combinations(conditions, 2))
 
-    comparisons = [dynet_internal(data, a, b) for a, b in pairs]
+    comparisons = [_compare_condition_pair(data, a, b) for a, b in pairs]
 
     edge_counts = pd.DataFrame(
         [
@@ -852,13 +1139,31 @@ def dynet_main(
     return {"comparisons": comparisons, "edge_counts": edge_counts}
 
 
-def dynet_plot(
-    result: Dict[str, Union[list, dict]],
+def plot_condition_changes(
+    result: Dict[str, Union[list, pd.DataFrame]],
     what: str = "edges",
     comparison: int = 0,
     top_n: int = 20,
-    ax=None,
-):
+    ax: Optional[Axes] = None,
+) -> Figure:
+    """Plot edge-status counts or degree-change rankings from condition comparisons.
+
+    Args:
+        result: Dictionary returned by ``compare_conditions``.
+        what: ``edges`` for gained/lost/kept counts; ``nodes`` for the top nodes
+            ranked by ``degree_change_score``.
+        comparison: Index in ``result["comparisons"]``, using Python list indexing.
+        top_n: Maximum number of nodes shown for a node plot.
+        ax: Optional matplotlib Axes to draw into; otherwise create a figure.
+
+    Returns:
+        A matplotlib Figure. The node bars show degree changes, not the
+            standardized scores visualized by ``rewiring_plot``.
+
+    Raises:
+        IndexError: The comparison index is out of range.
+        ValueError: The plot type is not ``edges`` or ``nodes``.
+    """
     comparisons = result["comparisons"]
     if comparison >= len(comparisons):
         raise IndexError("comparison index out of range")
@@ -871,17 +1176,72 @@ def dynet_plot(
         counts = comp["edge_changes"]["status"].value_counts().reindex(["gained", "lost", "kept"]).fillna(0)
         colors = ["#2a9d8f", "#e76f51", "#264653"]
         ax.bar(counts.index, counts.values, color=colors)
-        ax.set_title(f"Edge Rewiring: {comp['comparison']}")
+        ax.set_title(f"Edge Changes: {comp['comparison']}")
         ax.set_ylabel("Edge count")
         ax.set_xlabel("Status")
     elif what == "nodes":
         top = comp["node_changes"].head(top_n).iloc[::-1]
-        ax.barh(top["node"], top["rewiring_score"], color="#457b9d")
-        ax.set_title(f"Top Rewired Nodes: {comp['comparison']}")
-        ax.set_xlabel("Rewiring score")
+        ax.barh(top["node"], top["degree_change_score"], color="#457b9d")
+        ax.set_title(f"Node Degree Changes: {comp['comparison']}")
+        ax.set_xlabel("Degree-change score")
         ax.set_ylabel("Node")
     else:
         raise ValueError("what must be 'edges' or 'nodes'")
 
     plt.tight_layout()
     return ax.figure
+
+
+def _rename_comparison_score(comparison: dict, old: str, new: str) -> dict:
+    return {**comparison, "node_changes": comparison["node_changes"].rename(columns={old: new})}
+
+
+def dynet_internal(
+    data: pd.DataFrame, condition_a: str, condition_b: str,
+) -> Dict[str, Union[pd.DataFrame, dict, str]]:
+    """Compatibility wrapper for ``compare_condition_pair``.
+
+    Despite its historical name this is callable publicly. It accepts a prepared
+    condition-edge table and two condition labels, returning the pair comparison.
+    The historical ``rewiring_score`` column is retained, but it means
+    abs(delta_degree) + abs(delta_weight_degree), not the standardized score from
+    ``rewiring_analysis``. New code should use ``compare_condition_pair``, whose
+    output calls this column ``degree_change_score``.
+    """
+    return _rename_comparison_score(compare_condition_pair(data, condition_a, condition_b),
+                                    "degree_change_score", "rewiring_score")
+
+
+def dynet_main(
+    data: pd.DataFrame, conditions: Optional[Iterable[str]] = None, pairwise: str = "adjacent",
+) -> Dict[str, Union[list, pd.DataFrame]]:
+    """Compatibility wrapper for ``compare_conditions``, not a rewiring pipeline.
+
+    Accepts a condition-edge table, optional ordered conditions, and ``adjacent``
+    or ``all`` pairing. Returns comparison dictionaries and an edge-count table,
+    preserving the historical ``rewiring_score`` column for the degree-change
+    heuristic. It never calls ``rewiring_analysis``. New code should use
+    ``compare_conditions`` and its unambiguous ``degree_change_score`` column.
+    """
+    result = compare_conditions(data, conditions, pairwise)
+    result["comparisons"] = [_rename_comparison_score(item, "degree_change_score", "rewiring_score")
+                             for item in result["comparisons"]]
+    return result
+
+
+def dynet_plot(
+    result: Dict[str, Union[list, pd.DataFrame]], what: str = "edges", comparison: int = 0,
+    top_n: int = 20, ax: Optional[Axes] = None,
+) -> Figure:
+    """Plot a legacy ``dynet_main`` result through ``plot_condition_changes``.
+
+    Accepts the same plot options and returns a matplotlib Figure. Historical
+    ``rewiring_score`` columns are interpreted as degree-change scores, without
+    mutating the input. Use ``rewiring_plot`` to display actual standardized
+    rewiring scores; use ``plot_condition_changes`` for new comparison results.
+    """
+    converted = {**result, "comparisons": [
+        _rename_comparison_score(item, "rewiring_score", "degree_change_score")
+        for item in result["comparisons"]
+    ]}
+    return plot_condition_changes(converted, what, comparison, top_n, ax)

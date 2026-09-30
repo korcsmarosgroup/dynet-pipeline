@@ -2,6 +2,10 @@
 
 ## API Example
 
+This calculates standardized per-node rewiring scores. The separate
+`compare_conditions` workflow reports edge turnover and degree changes; see the
+[API reference](api.md) when those are the results you need.
+
 ```python
 import pandas as pd
 from dynet_py import prepare_networks, rewiring_analysis, rewiring_plot, compare_targeting
