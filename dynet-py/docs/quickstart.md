@@ -11,10 +11,10 @@ import pandas as pd
 from dynet_py import prepare_networks, rewiring_analysis, rewiring_plot, compare_targeting
 
 net1 = pd.DataFrame(
-    {"from": ["A", "A", "B"], "to": ["B", "C", "C"], "weight": [1.0, 2.0, 1.0]}
+    {"source": ["A", "A", "B"], "target": ["B", "C", "C"], "weight": [1.0, 2.0, 1.0]}
 )
 net2 = pd.DataFrame(
-    {"from": ["A", "B", "C"], "to": ["C", "C", "B"], "weight": [2.0, 1.0, 1.0]}
+    {"source": ["A", "B", "C"], "target": ["C", "C", "B"], "weight": [2.0, 1.0, 1.0]}
 )
 
 networks = prepare_networks({"net1": net1, "net2": net2})

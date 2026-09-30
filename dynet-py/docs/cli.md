@@ -17,8 +17,8 @@ Provide exactly one of:
 
 Each CSV must contain:
 
-- `from`
-- `to`
+- `source`
+- `target`
 - `weight` (optional; defaults to 1)
 
 ### `--input-csv` format
@@ -26,9 +26,13 @@ Each CSV must contain:
 Single CSV with:
 
 - `network`
-- `from`
-- `to`
+- `source`
+- `target`
 - `weight` (optional; defaults to 1)
+
+Both modes also accept `from`/`to` or `src`/`dst` as endpoint aliases. The parser
+normalizes them to `source`/`target`; multiple endpoint pairs in one CSV are
+rejected as ambiguous. Input files using the earlier names remain supported.
 
 Inputs use the same strict validation as `prepare_networks()`: invalid weights
 and missing network or node labels raise an error before results are written.

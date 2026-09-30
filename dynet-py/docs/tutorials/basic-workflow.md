@@ -6,8 +6,8 @@ This tutorial shows the full flow from edge-list data to rewiring outputs.
 
 Your network tables must include:
 
-- `from`
-- `to`
+- `source`
+- `target`
 - `weight` (optional)
 
 ## 2. Run Analysis

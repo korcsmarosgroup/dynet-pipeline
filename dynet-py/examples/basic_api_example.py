@@ -14,15 +14,15 @@ from dynet_py import prepare_networks, compare_targeting, rewiring_analysis, rew
 def main() -> None:
     net1 = pd.DataFrame(
         {
-            "from": ["A", "A", "B", "C"],
-            "to": ["B", "C", "C", "A"],
+            "source": ["A", "A", "B", "C"],
+            "target": ["B", "C", "C", "A"],
             "weight": [1.0, 2.0, 1.0, 1.0],
         }
     )
     net2 = pd.DataFrame(
         {
-            "from": ["A", "B", "C", "D"],
-            "to": ["C", "C", "B", "A"],
+            "source": ["A", "B", "C", "D"],
+            "target": ["C", "C", "B", "A"],
             "weight": [2.0, 1.0, 1.0, 1.0],
         }
     )

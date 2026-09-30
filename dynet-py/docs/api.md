@@ -23,6 +23,30 @@ The CLI runs the standardized-score workflow. `dynet_main` and `dynet_internal`
 are historical names for condition comparisons, not orchestration or internals
 of the score calculator.
 
+## Edge-List Column Names
+
+Use `source`, `target`, and optional `weight` in both workflows. Condition tables
+also have a `condition` column. `prepare_networks`, `prepare_condition_data`,
+legacy `package_data`, and the CLI accept these endpoint pairs:
+
+| Input columns | Normalized columns |
+| --- | --- |
+| `source`, `target` (preferred) | `source`, `target` |
+| `from`, `to` | `source`, `target` |
+| `src`, `dst` | `source`, `target` |
+
+Normalization happens during preparation, leaving the caller's table unchanged.
+Calculations and plots consume the prepared names. Condition-edge outputs also
+use `source` and `target`, so their columns do not need renaming before preparing
+separate networks for scoring. The node-result schemas remain unchanged.
+
+Duplicate column names or multiple complete endpoint pairs are rejected, even
+when their values agree. Keep only one pair, or select columns explicitly with
+`prepare_condition_data(data, source="origin", target="destination")` for custom
+names. Selecting only one endpoint leaves the other at its canonical name.
+For network inputs, a square DataFrame with matching row/column node-label sets
+is treated as an adjacency matrix, even if those labels include `source`/`target`.
+
 ## Standardized Rewiring Scores
 
 - `PreparedNetworks`
@@ -75,7 +99,7 @@ that preserves the established NaN/Inf behavior. This fallback may be slower.
 
 ## Condition Comparisons
 
-- `prepare_condition_data(data, source="source", target="target", condition="condition", ...)`
+- `prepare_condition_data(data, source=None, target=None, condition="condition", ...)`
   validates a single table, normalizes labels and weights, and aggregates
   duplicate edges within each condition. Missing/invalid weights are rejected;
   omitted weights default to 1. Self-loops are removed by default.
@@ -91,8 +115,8 @@ Supply the desired condition order explicitly, especially for time series.
 Preparation sorts grouping keys; the comparison default follows their appearance
 in the prepared table, not an inferred chronological order.
 
-Unlike the rewiring-score input format, condition tables use `source`, `target`,
-`condition`, and `weight` columns. Their row membership defines edges, so even
+Condition tables add `condition` to the shared `source`, `target`, and `weight`
+format. Their row membership defines edges, so even
 zero-weight rows count as present. If self-loops are retained, they count twice in
 total degree (once incoming and once outgoing), matching the legacy comparison.
 `PreparedNetworks` and comparison dictionaries are not interchangeable inputs.
@@ -100,7 +124,7 @@ total degree (once incoming and once outgoing), matching the legacy comparison.
 ```python
 from dynet_py import prepare_condition_data, compare_conditions, plot_condition_changes
 
-data = prepare_condition_data(raw, source="src", target="dst", condition="time", weight="w")
+data = prepare_condition_data(raw)
 changes = compare_conditions(data, conditions=["T0", "T1"], pairwise="adjacent")
 node_changes = changes["comparisons"][0]["node_changes"]
 figure = plot_condition_changes(changes, what="nodes")

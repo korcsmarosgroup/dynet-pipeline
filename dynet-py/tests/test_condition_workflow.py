@@ -42,10 +42,7 @@ def test_degree_change_and_standardized_rewiring_are_distinct_metrics(analyze, b
     assert changes["node_changes"]["degree_change_score"].eq(0).all()
     assert "rewiring_score" not in changes["node_changes"]
 
-    networks = {
-        name: frame.rename(columns={"source": "from", "target": "to"})
-        for name, frame in data.groupby("condition")
-    }
+    networks = {name: frame for name, frame in data.groupby("condition")}
     scores = rewiring_analysis(prepare_networks(networks)).set_index("name")
     assert scores["rewiring"].to_dict() == {"A": 1., "B": 1., "C": 1., "D": 1.}
 

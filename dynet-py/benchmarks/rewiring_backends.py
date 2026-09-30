@@ -30,8 +30,8 @@ def make_inputs(nodes, networks, density):
         positions = rng.choice(nodes**2, size=round(nodes**2 * density), replace=False)
         result[str(index)] = pd.DataFrame({
             # Zero-weight loops retain all nodes, including isolates.
-            "from": np.concatenate((labels[positions // nodes], labels)),
-            "to": np.concatenate((labels[positions % nodes], labels)),
+            "source": np.concatenate((labels[positions // nodes], labels)),
+            "target": np.concatenate((labels[positions % nodes], labels)),
             "weight": np.concatenate((rng.uniform(0.1, 3., len(positions)), np.zeros(nodes))),
         })
     return result

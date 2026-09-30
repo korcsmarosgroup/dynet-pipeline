@@ -35,9 +35,13 @@ export MPLCONFIGDIR=/tmp/matplotlib
 
 Each network can be:
 
-- edge-list DataFrame with `from`, `to`, optional `weight`
+- edge-list DataFrame with `source`, `target`, optional `weight`
 - adjacency matrix (square DataFrame or ndarray)
 - graph-like object with `.nodes()` and `.edges()`
+
+The parsers and CLI also accept `from`/`to` and `src`/`dst` as aliases and normalize
+them to `source`/`target`. Use the same names for condition comparisons, adding a
+`condition` column. A table with multiple endpoint pairs is ambiguous and rejected.
 
 ## How many networks are required?
 

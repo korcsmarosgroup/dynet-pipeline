@@ -18,8 +18,42 @@ import numpy as np
 import pandas as pd
 
 
+_EDGE_COLUMN_PAIRS = (("source", "target"), ("from", "to"), ("src", "dst"))
+
+
 def _is_edge_list_df(df: pd.DataFrame) -> bool:
-    return {"from", "to"}.issubset(df.columns)
+    # Explicit matching node axes identify an adjacency matrix, even when its
+    # node labels happen to be endpoint-column names such as source and target.
+    if df.shape[0] == df.shape[1] and set(df.index) == set(df.columns):
+        return False
+    return any(set(pair).issubset(df.columns) for pair in _EDGE_COLUMN_PAIRS)
+
+
+def _resolve_edge_columns(
+    data: pd.DataFrame, source: Optional[str] = None, target: Optional[str] = None,
+) -> tuple[str, str]:
+    """Resolve endpoint aliases at input boundaries; never guess between pairs."""
+    if not isinstance(data, pd.DataFrame):
+        raise ValueError("Edge lists must be pandas DataFrames.")
+    if not data.columns.is_unique:
+        raise ValueError("Edge-list column names must be unique.")
+    if source is not None or target is not None:
+        source = "source" if source is None else source
+        target = "target" if target is None else target
+        if source == target:
+            raise ValueError("Source and target must select distinct columns.")
+        missing = [name for name in (source, target) if name not in data.columns]
+        if missing:
+            raise ValueError(f"Missing columns in input data: {missing}")
+        return source, target
+    matches = [pair for pair in _EDGE_COLUMN_PAIRS if set(pair).issubset(data.columns)]
+    if len(matches) > 1:
+        raise ValueError("Ambiguous edge-list columns: multiple endpoint pairs found. "
+                         "Keep only one pair or select source and target explicitly.")
+    if not matches:
+        raise ValueError("Edge lists require source,target columns "
+                         "(aliases: from,to or src,dst).")
+    return matches[0]
 
 
 def _ordered_unique(values: Iterable[str]) -> list[str]:
@@ -109,22 +143,21 @@ class _PreparedNetwork:
 
 
 def _prepare_edgelist(el: pd.DataFrame) -> _PreparedNetwork:
-    if not el.columns.is_unique:
-        raise ValueError("Edge-list column names must be unique.")
-    labels = _normalize_labels(list(el["from"]) + list(el["to"]), "Node labels", unique=False)
-    work = pd.DataFrame({"from": labels[:len(el)], "to": labels[len(el):]}, dtype=object)
+    source, target = _resolve_edge_columns(el)
+    labels = _normalize_labels(list(el[source]) + list(el[target]), "Node labels", unique=False)
+    work = pd.DataFrame({"source": labels[:len(el)], "target": labels[len(el):]}, dtype=object)
     work["weight"] = (
         _normalize_weights(el["weight"])
         if "weight" in el.columns else 1.0
     )
     nodes = _ordered_unique(labels)
-    grouped = work.groupby(["from", "to"], as_index=False)["weight"].sum()
+    grouped = work.groupby(["source", "target"], as_index=False)["weight"].sum()
     if not np.isfinite(grouped["weight"].to_numpy()).all():
         raise ValueError("Summed edge weights must be finite.")
     grouped = grouped[grouped["weight"] != 0].copy()
     # Match matrix row-major edge order without allocating a dense matrix.
     order = {node: i for i, node in enumerate(nodes)}
-    grouped = grouped.sort_values(["from", "to"], key=lambda col: col.map(order)).reset_index(drop=True)
+    grouped = grouped.sort_values(["source", "target"], key=lambda col: col.map(order)).reset_index(drop=True)
     return _PreparedNetwork(nodes, edges=grouped)
 
 
@@ -203,8 +236,8 @@ class PreparedNetworks(Mapping[str, _PreparedNetwork]):
                     # Populate the common node axes directly from normalized
                     # edges, without building intermediate per-network matrices.
                     edges = network.edges()
-                    rows = nodes.get_indexer(edges["from"])
-                    columns = nodes.get_indexer(edges["to"])
+                    rows = nodes.get_indexer(edges["source"])
+                    columns = nodes.get_indexer(edges["target"])
                     tensor[i, rows, columns] = edges["weight"].to_numpy()
             tensor.setflags(write=False)
             self._adjacency_tensor = tensor
@@ -216,8 +249,8 @@ class PreparedNetworks(Mapping[str, _PreparedNetwork]):
             edge_ids, weights, lengths = [], [], []
             for network in self.values():
                 edges = network.edges()
-                edge_ids.append(nodes.get_indexer(edges["from"]) * len(nodes)
-                                + nodes.get_indexer(edges["to"]))
+                edge_ids.append(nodes.get_indexer(edges["source"]) * len(nodes)
+                                + nodes.get_indexer(edges["target"]))
                 weights.append(edges["weight"].to_numpy())
                 lengths.append(len(edges))
             ids, groups = np.unique(np.concatenate(edge_ids), return_inverse=True)
@@ -256,8 +289,11 @@ def prepare_networks(input_list: Union[Mapping[str, object], Sequence[object]]) 
 
     Args:
         input_list: Named mapping or sequence of edge-list DataFrames with
-            ``from``, ``to``, and optional ``weight`` columns, square adjacency
-            DataFrames/arrays, graph-like objects, or already prepared networks.
+            ``source``, ``target``, and optional ``weight`` columns (aliases:
+            ``from``/``to`` or ``src``/``dst``), square adjacency DataFrames/arrays,
+            graph-like objects, or already prepared networks. Multiple endpoint
+            pairs are rejected; labeled square tables with matching row/column
+            node sets are treated as adjacency matrices.
 
     Returns:
         A reusable read-only mapping for ``rewiring_analysis``, targeting,
@@ -355,8 +391,8 @@ def _indata_to_edgelist(ingraph: pd.DataFrame) -> pd.DataFrame:
     rows, cols = np.where(arr != 0)
     return pd.DataFrame(
         {
-            "from": ingraph.index.to_numpy()[rows],
-            "to": ingraph.columns.to_numpy()[cols],
+            "source": ingraph.index.to_numpy()[rows],
+            "target": ingraph.columns.to_numpy()[cols],
             "weight": arr[rows, cols],
         }
     )
@@ -594,9 +630,9 @@ def small_multiples_plot(
         raise ValueError("mode must be 'focus_only' or 'r_compat'")
 
     for name, network in networks.items():
-        el = network.edges()[["from", "to"]].copy()
+        el = network.edges()[["source", "target"]].copy()
         if mode == "focus_only":
-            el = el[(el["from"] == focus_node) | (el["to"] == focus_node)]
+            el = el[(el["source"] == focus_node) | (el["target"] == focus_node)]
         el = el.copy()
         el["id"] = name
         edges_by_network.append(el)
@@ -618,9 +654,9 @@ def small_multiples_plot(
             edges = []
         else:
             nodes = _ordered_unique(
-                [focus_node] + subset["from"].tolist() + subset["to"].tolist()
+                [focus_node] + subset["source"].tolist() + subset["target"].tolist()
             )
-            edges = list(subset[["from", "to"]].itertuples(index=False, name=None))
+            edges = list(subset[["source", "target"]].itertuples(index=False, name=None))
 
         m = max(1, len(nodes))
         angles = np.linspace(0, 2 * np.pi, num=m, endpoint=False)
@@ -665,7 +701,7 @@ def calculate_jaccard_indices(
     """
     prepared = prepare_networks(networks)
     names = list(prepared)
-    edge_sets = [set(net.edges()[["from", "to"]].itertuples(index=False, name=None))
+    edge_sets = [set(net.edges()[["source", "target"]].itertuples(index=False, name=None))
                  for net in prepared.values()]
     n = len(edge_sets)
     jaccard_matrix = np.zeros((n, n), dtype=float)
@@ -698,7 +734,7 @@ def compare_targeting(
 
     targeting_frames: list[pd.DataFrame] = []
     for i, net in enumerate(formatted.values(), start=1):
-        in_targeting = net.edges().groupby("to")["weight"].sum().reindex(net.nodes, fill_value=0.0)
+        in_targeting = net.edges().groupby("target")["weight"].sum().reindex(net.nodes, fill_value=0.0)
         frame = pd.DataFrame({"name": in_targeting.index, "targeting": in_targeting.to_numpy()})
         frame["network_id"] = i
         targeting_frames.append(frame[["name", "targeting", "network_id"]])
@@ -764,8 +800,8 @@ def compare_targeting(
 
 def package_data_rename(
     data: pd.DataFrame,
-    source: str,
-    target: str,
+    source: Optional[str],
+    target: Optional[str],
     condition: str,
     weight: Optional[str] = None,
 ) -> pd.DataFrame:
@@ -773,7 +809,8 @@ def package_data_rename(
 
     Args:
         data: Input edge table.
-        source: Column containing source nodes.
+        source: Column containing source nodes; use None with target=None to
+            detect ``source``/``target``, ``from``/``to``, or ``src``/``dst``.
         target: Column containing target nodes.
         condition: Column containing condition labels.
         weight: Weight column to rename. If omitted, an existing ``weight``
@@ -781,27 +818,26 @@ def package_data_rename(
 
     Returns:
         A copy with ``source``, ``target``, ``condition``, and ``weight`` columns.
-            This low-level compatibility helper does not validate or aggregate data;
+            This helper selects columns but does not validate values or aggregate;
             prefer ``prepare_condition_data`` for a complete preparation step.
 
     Raises:
-        ValueError: A requested column is absent.
+        ValueError: A requested column is absent, names are duplicated, or
+            endpoint selection is ambiguous.
     """
+    source, target = _resolve_edge_columns(data, source, target)
     cols = [source, target, condition] + ([weight] if weight else [])
     missing = [c for c in cols if c not in data.columns]
     if missing:
         raise ValueError(f"Missing columns in input data: {missing}")
 
-    out = data.copy()
-    rename_map = {source: "source", target: "target", condition: "condition"}
-    if weight:
-        rename_map[weight] = "weight"
-
-    out = out.rename(columns=rename_map)
-    if "weight" not in out.columns:
-        out["weight"] = 1.0
-
-    return out[["source", "target", "condition", "weight"]]
+    # Select before renaming so explicit custom mappings cannot collide with
+    # unused canonical columns already present in the input.
+    out = data[[source, target, condition]].copy()
+    out.columns = ["source", "target", "condition"]
+    weight_column = weight if weight else "weight"
+    out["weight"] = data[weight_column] if weight_column in data.columns else 1.0
+    return out
 
 
 def package_data_remap(
@@ -845,8 +881,8 @@ def package_data_remap(
 
 def prepare_condition_data(
     data: pd.DataFrame,
-    source: str = "source",
-    target: str = "target",
+    source: Optional[str] = None,
+    target: Optional[str] = None,
     condition: str = "condition",
     weight: Optional[str] = None,
     directed: bool = True,
@@ -857,8 +893,11 @@ def prepare_condition_data(
 
     Args:
         data: Table containing node and condition columns.
-        source: Source-node column name.
-        target: Target-node column name.
+        source: Source-node column name. With both endpoints omitted, detect
+            ``source``/``target`` or the aliases ``from``/``to`` and ``src``/``dst``.
+            Multiple matching pairs require an explicit selection.
+        target: Target-node column name. If only one endpoint is specified,
+            the other uses its canonical name (``source`` or ``target``).
         condition: Condition column name.
         weight: Weight column name. If omitted, retain an existing ``weight``
             column or default to 1.
@@ -895,8 +934,8 @@ def prepare_condition_data(
 
 def package_data(
     data: pd.DataFrame,
-    source: str = "source",
-    target: str = "target",
+    source: Optional[str] = None,
+    target: Optional[str] = None,
     condition: str = "condition",
     weight: Optional[str] = None,
     directed: bool = True,

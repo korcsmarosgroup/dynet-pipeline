@@ -16,6 +16,12 @@ These are different calculations. Condition comparisons report
 zero even when neighbors change. `rewiring_analysis` measures standardized
 edge-weight variation across networks and produces the `rewiring` column.
 
+Both workflows use edge-list columns **`source`, `target`, `weight`**.
+Condition comparisons add a `condition` column. The parsers and CLI also accept
+`from`/`to` and `src`/`dst`, normalizing them once to `source`/`target`. Keep just
+one endpoint pair per table; ambiguous aliases raise an error. Existing input
+files using either alias pair continue to work.
+
 The rewiring-score workflow also exposes:
 
 - `prepare_networks`
@@ -104,8 +110,8 @@ mkdocs build --strict
 import pandas as pd
 from dynet_py import prepare_networks, rewiring_analysis, rewiring_plot
 
-el1 = pd.DataFrame({"from": ["A", "B"], "to": ["B", "C"], "weight": [1, 2]})
-el2 = pd.DataFrame({"from": ["A", "C"], "to": ["C", "B"], "weight": [2, 1]})
+el1 = pd.DataFrame({"source": ["A", "B"], "target": ["B", "C"], "weight": [1, 2]})
+el2 = pd.DataFrame({"source": ["A", "C"], "target": ["C", "B"], "weight": [2, 1]})
 
 networks = prepare_networks({"net1": el1, "net2": el2})
 res = rewiring_analysis(networks)
@@ -137,8 +143,9 @@ dynet-py --input-csv input_edges.csv --out-dir results
 ```
 
 Expected input columns:
-- `from`
-- `to`
+
+- `source`
+- `target`
 - `weight` (optional, defaults to `1`)
 
 For `--input-csv`, include `network` as well.
@@ -157,14 +164,14 @@ from dynet_py import prepare_condition_data, compare_conditions, plot_condition_
 
 raw = pd.DataFrame(
     {
-        "src": ["A", "A", "B", "C", "C"],
-        "dst": ["B", "C", "C", "D", "A"],
-        "cond": ["T0", "T0", "T1", "T1", "T1"],
-        "w": [1.0, 1.2, 0.5, 2.0, 1.0],
+        "source": ["A", "A", "B", "C", "C"],
+        "target": ["B", "C", "C", "D", "A"],
+        "condition": ["T0", "T0", "T1", "T1", "T1"],
+        "weight": [1.0, 1.2, 0.5, 2.0, 1.0],
     }
 )
 
-condition_data = prepare_condition_data(raw, source="src", target="dst", condition="cond", weight="w")
+condition_data = prepare_condition_data(raw)
 changes = compare_conditions(condition_data, conditions=["T0", "T1"])
 fig = plot_condition_changes(changes, what="edges")
 ```

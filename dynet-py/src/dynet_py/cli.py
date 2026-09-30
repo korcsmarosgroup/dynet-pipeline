@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from .core import prepare_networks, compare_targeting, rewiring_analysis, rewiring_plot, small_multiples_plot
+from .core import (
+    _resolve_edge_columns, prepare_networks, compare_targeting,
+    rewiring_analysis, rewiring_plot, small_multiples_plot,
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -17,12 +20,12 @@ def _parse_args() -> argparse.Namespace:
         "--edge-lists",
         nargs="+",
         metavar="CSV",
-        help="Two or more CSV files with columns: from,to[,weight].",
+        help="Two or more CSV files with source,target[,weight] (aliases: from,to or src,dst).",
     )
     parser.add_argument(
         "--input-csv",
         default=None,
-        help="Single CSV with columns: network,from,to[,weight].",
+        help="Single CSV with network,source,target[,weight] (endpoint aliases: from,to or src,dst).",
     )
     parser.add_argument(
         "--out-dir",
@@ -50,9 +53,10 @@ def _parse_args() -> argparse.Namespace:
 
 def _load_edge_list(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
-    required = {"from", "to"}
-    if not required.issubset(df.columns):
-        raise ValueError(f"{path} must contain columns: from,to[,weight]")
+    try:
+        _resolve_edge_columns(df)
+    except ValueError as exc:
+        raise ValueError(f"{path}: {exc}") from exc
     return df
 
 
@@ -68,9 +72,9 @@ def main() -> None:
 
     if args.input_csv:
         input_df = pd.read_csv(args.input_csv)
-        required = {"network", "from", "to"}
-        if not required.issubset(input_df.columns):
-            raise ValueError("--input-csv must contain columns: network,from,to[,weight]")
+        if "network" not in input_df.columns:
+            raise ValueError("--input-csv must contain a network column.")
+        _resolve_edge_columns(input_df)
         networks = {
             net: grp.drop(columns="network")
             for net, grp in input_df.groupby("network", sort=False, dropna=False)
