@@ -1,0 +1,6 @@
+view,displayed_nodes,file
+Full network: automatic,2000,01_full_network_auto.png
+Full network: spring,2000,02_full_network_spring.png
+Top 40 by rewiring,40,03_top_40_nodes.png
+One-hop neighborhood,20,04_focused_neighborhood.png
+Three condition panels,20,05_neighborhood_comparison.png

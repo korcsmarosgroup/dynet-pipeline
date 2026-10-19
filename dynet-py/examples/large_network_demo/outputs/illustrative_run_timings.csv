@@ -1,0 +1,9 @@
+step,seconds
+generate synthetic inputs,0.31351933302357793
+prepare inputs,0.09585958300158381
+sparse rewiring scores,0.005282500002067536
+01_full_network_auto.png,1.1368745419895276
+02_full_network_spring.png,32.89445274998434
+03_top_40_nodes.png,0.26388504198985174
+04_focused_neighborhood.png,0.2557343749795109
+05_neighborhood_comparison.png,0.5237433330039494

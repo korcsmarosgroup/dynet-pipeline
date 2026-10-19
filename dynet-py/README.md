@@ -191,6 +191,11 @@ It generates three synthetic 180-node networks, calculates scores with the
 sparse backend, and saves full, ranked, and neighborhood figures alongside
 the input edge lists and scores under `examples/large_network_output/`.
 
+For a larger worked example, open the [executed 2,000-node notebook](examples/large_network_demo/large_network_demo.ipynb).
+It includes three synthetic conditions with 8,000 edges each, all input tables
+and scores, and five saved plotting views. See its [setup instructions and gallery](examples/large_network_demo/README.md)
+to run the notebook or companion script.
+
 ## Jupyter tutorial
 
 Open [the tutorial notebook](examples/dynet_py_tutorial.ipynb) for a self-contained

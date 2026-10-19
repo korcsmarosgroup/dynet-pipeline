@@ -1,0 +1,28 @@
+{
+  "nodes_per_condition": 2000,
+  "edges_per_condition": {
+    "condition_1": 8000,
+    "condition_2": 8000,
+    "condition_3": 8000
+  },
+  "directed_union_edges": 10983,
+  "conditions": [
+    "condition_1",
+    "condition_2",
+    "condition_3"
+  ],
+  "seed": 20261019,
+  "focus_node": "node_1563",
+  "neighborhood_nodes": 20,
+  "checks": "All full scores retained and unchanged after plotting",
+  "software_versions": {
+    "python": "3.13.5",
+    "dynet-py": "0.1.0",
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "matplotlib": "3.11.2",
+    "networkx": "3.7",
+    "scipy": "1.18.1"
+  },
+  "purpose": "Synthetic plotting demonstration; not validation or a p-value benchmark"
+}

@@ -16,6 +16,11 @@ Cells**. It covers both workflows, flat tables, plotting, CSV export, aliases,
 validation, and the dense/sparse backends. Its export section writes files under
 `tutorial_output/` in the notebook's working directory.
 
+For larger network figures, try the [executed 2,000-node example](https://github.com/korcsmarosgroup/dynet-pipeline/blob/main/dynet-py/examples/large_network_demo/large_network_demo.ipynb).
+It includes synthetic inputs, scores, and full/ranked/neighborhood plots across
+three conditions. Its [README](https://github.com/korcsmarosgroup/dynet-pipeline/blob/main/dynet-py/examples/large_network_demo/README.md)
+provides launch instructions and an image gallery.
+
 ## API Example
 
 This calculates standardized per-node rewiring scores. The separate
