@@ -97,6 +97,85 @@ variance uses a centered second pass to avoid subtracting nearly equal squared
 moments. Signed-weight cancellation and overflow use a bounded-memory fallback
 that preserves the established NaN/Inf behavior. This fallback may be slower.
 
+### Network Figures
+
+```text
+rewiring_plot(
+    networks, scores, structure_only=False, *, layout="auto", labels="auto", top_n=None,
+    focus_node=None, radius=1, seed=0, figsize=(9, 7),
+)
+small_multiples_plot(
+    networks, focus_node, mode="focus_only", *, layout="auto", labels="auto",
+    radius=1, max_nodes=None, seed=0, figsize=None,
+)
+```
+
+Both functions accept raw or prepared networks and return matplotlib Figures.
+Filtering applies only to the drawing; calculate scores on the full prepared
+networks and reuse that score table for each view. A filtered figure reports
+the displayed node count so a partial view is visible to the reader.
+
+| Option | Behavior |
+| --- | --- |
+| `layout="auto"` | Circular for at most 30 or more than 500 displayed nodes; spring for 31–500 when optional dependencies are available, otherwise circular. |
+| `layout="circular"` | Circular positions without optional layout dependencies. |
+| `layout="spring"` | NetworkX spring layout; install the plotting extra. |
+| `layout="kamada_kawai"` | NetworkX Kamada–Kawai layout; install the plotting extra. |
+| `seed=0` | Reproducible spring positions; use the same selected nodes and explicit layout for repeatable views. |
+| `labels="all"`, `"none"`, or node names | Label every displayed node, no nodes, or an explicit iterable of node labels. |
+
+Install the optional layouts from the package directory:
+
+```bash
+python -m pip install -e ".[plot]"
+```
+
+The extra includes NetworkX and SciPy. Sparse rewiring scores do not require
+either dependency. Choosing `auto` without them retains circular plotting;
+an explicit spring or Kamada–Kawai request gives an installation message.
+
+For `rewiring_plot`, `labels="auto"` labels all nodes when at most 30 are
+displayed, then the 10 highest-scoring visible nodes, retaining the focal node
+within that label cap when one is selected. `top_n` selects the largest
+`rewiring` values, with positive infinity first and missing scores last. `focus_node`
+restricts the view to its neighborhood; `radius` counts hops along incoming or
+outgoing edges in the union of the networks. If combined with `top_n`, the cap
+applies within that neighborhood and retains the focal node. The figure draws
+edges between the selected nodes. The usual weighted view uses positive-weight
+edges for visibility. Pass `structure_only=True` when plotting structural scores
+to include all nonzero edges, including negative weights.
+Colors use the full supplied score range, rather than rescaling after a node
+filter, so filtered and full views of the same scores can be compared directly.
+
+For `small_multiples_plot`, `mode="focus_only"` selects the focal neighborhood
+from the union of nonzero edges and draws each network's directed edges between
+those selected nodes. `radius=1` selects immediate neighbors; larger values
+include additional hops. Positions are calculated once from the union and reused
+across panels. Set `max_nodes` to cap the neighborhood, ranked by degree in that
+union while always retaining the focal node. Its automatic labels show all nodes
+up to 30 displayed nodes, otherwise only the focal node. `mode="r_compat"`
+displays the full nonzero graph and accepts only the default radius.
+All panels show the same selected union nodes: a gray non-focal node is absent
+from that condition. The focal node remains red, including when absent or isolated.
+
+```python
+from dynet_py import rewiring_plot, small_multiples_plot
+
+labels = scores.sort_values("rewiring", ascending=False)["name"].head(10)
+ranked = rewiring_plot(
+    networks, scores, top_n=40, layout="spring", labels=labels, seed=0,
+)
+local = rewiring_plot(
+    networks, scores, focus_node="A", radius=2, top_n=40, layout="spring",
+)
+panels = small_multiples_plot(
+    networks, focus_node="A", radius=2, max_nodes=40, layout="spring", seed=0,
+)
+```
+
+The [large-network example](https://github.com/korcsmarosgroup/dynet-pipeline/blob/main/dynet-py/examples/large_network_plotting.py) generates
+synthetic networks and saves these views without downloading input data.
+
 ## Condition Comparisons
 
 - `prepare_condition_data(data, source=None, target=None, condition="condition", ...)`

@@ -13,9 +13,12 @@ from typing import Dict, Iterable, Iterator, Mapping, NamedTuple, Optional, Sequ
 
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
+from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 import numpy as np
 import pandas as pd
+
+from ._plotting import _layout_positions, _limit_plot_nodes, _plot_labels, _plot_options, _select_plot_nodes
 
 
 _EDGE_COLUMN_PAIRS = (("source", "target"), ("from", "to"), ("src", "dst"))
@@ -542,62 +545,137 @@ def _sparse_nonfinite_totals(
     return totals
 
 
+def _plot_score_values(output_dataframe: pd.DataFrame) -> tuple[dict, dict]:
+    """Read score attributes without changing the supplied analysis table."""
+    required = {"name", "rewiring", "degree"}
+    if not isinstance(output_dataframe, pd.DataFrame) or not required.issubset(output_dataframe.columns):
+        raise ValueError("Expected a rewiring_analysis score table with name, rewiring, and degree columns.")
+    if not output_dataframe.columns.is_unique:
+        raise ValueError("Score table column names must be unique.")
+    table = output_dataframe[["name", "rewiring", "degree"]].copy()
+    if table["name"].isna().any():
+        raise ValueError("Score node names must not be missing.")
+    table["name"] = table["name"].astype(str)
+    if not table["name"].is_unique:
+        raise ValueError("Score node names must be unique after conversion to strings.")
+    for column in ("rewiring", "degree"):
+        try:
+            values = pd.to_numeric(table[column], errors="raise")
+            if np.iscomplexobj(values):
+                raise ValueError
+            table[column] = values.astype(float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Rewiring and degree attributes must be real numeric values.") from exc
+    table = table.set_index("name")
+    return table["rewiring"].to_dict(), table["degree"].to_dict()
+
+
 def rewiring_plot(
     matrix_list: Union[Mapping[str, object], Sequence[object]],
     output_dataframe: pd.DataFrame,
     structure_only: bool = False,
+    *,
+    layout: str = "auto",
+    labels: Union[str, Iterable[object]] = "auto",
+    top_n: Optional[int] = None,
+    focus_node: Optional[object] = None,
+    radius: int = 1,
+    seed: int = 0,
+    figsize: Tuple[float, float] = (9, 7),
 ) -> Figure:
     """Plot a network union colored by scores from ``rewiring_analysis``.
 
     Args:
-        matrix_list: The raw or prepared networks used to calculate the scores.
+        matrix_list: Raw or prepared networks used to calculate the scores.
         output_dataframe: Score table with ``name``, ``rewiring``, and ``degree``
-            columns. A condition-comparison result is not a score table.
-        structure_only: Include all nonzero edges, including negative weights.
-            Otherwise include positive edges only. Match the scoring mode.
+            columns. Numeric node IDs are matched to prepared string labels.
+        structure_only: Include all nonzero edges, including negative weights;
+            otherwise include positive edges only. Match the scoring mode.
+        layout: ``circular``, ``spring``, ``kamada_kawai``, or ``auto``. Auto uses
+            circular up to 30 or above 500 displayed nodes, otherwise spring
+            when optional plotting dependencies are available, or circular.
+            Install ``dynet-py[plot]`` to enable explicit NetworkX layouts.
+        labels: ``auto`` labels all nodes up to 30, otherwise the ten highest
+            rewiring scores, retaining the focus within that label cap. Use
+            ``all``, ``none``, or an iterable of node IDs.
+        top_n: Positive cap on displayed nodes, ranked by supplied rewiring.
+            NaNs rank last; ties follow prepared node order. Retain the focus
+            within the cap. None includes all eligible nodes.
+        focus_node: Optional node whose undirected union neighborhood is shown.
+        radius: Nonnegative hop distance around the focus, before ranking.
+        seed: Nonnegative random seed for reproducible spring layouts.
+        figsize: Figure width and height in inches.
 
     Returns:
-        A matplotlib Figure with a circular layout, undirected union edges,
-            node color representing rewiring, and node size representing degree.
-            Missing node scores default to zero. This function does not recalculate
-            scores; use ``plot_condition_changes`` for condition-comparison bars.
+        A matplotlib Figure with undirected union edges, node color representing
+            supplied rewiring, and node size representing supplied full-network
+            degree. Filtering changes display only and adds a visible node count.
+            The color scale follows the full graph. Missing scores default to
+            zero; nonfinite scores appear gray. This
+            function never recalculates scores or requests dense adjacency data.
+
+    Raises:
+        ValueError: Invalid display options, score table, or unknown focus node.
+        ImportError: An explicit layout needs missing optional dependencies.
     """
+    labels = _plot_options(layout, labels, radius, top_n, seed, figsize)
     networks = prepare_networks(matrix_list)
-    node_names = networks.node_names
-    node_order = {node: i for i, node in enumerate(node_names)}
+    all_nodes = list(networks.node_names)
+    focus = str(focus_node) if focus_node is not None else None
+    if focus is not None and focus not in all_nodes:
+        raise ValueError(f"Unknown focus node {focus!r} in the prepared networks.")
+    ranks, degrees = _plot_score_values(output_dataframe)
+    node_order = {node: i for i, node in enumerate(all_nodes)}
     union_edges = set()
-    for net in networks.values():
-        for src, dst, weight in net.edges().itertuples(index=False, name=None):
+    for network in networks.values():
+        for source, target, weight in network.edges().itertuples(index=False, name=None):
             if structure_only or weight > 0:
-                union_edges.add(tuple(sorted((src, dst), key=node_order.__getitem__)))
+                union_edges.add(tuple(sorted((source, target), key=node_order.__getitem__)))
     edges = sorted(union_edges, key=lambda edge: (node_order[edge[0]], node_order[edge[1]]))
-    attr = output_dataframe.set_index("name")
-    rewiring = np.array([attr["rewiring"].get(n, 0.0) for n in node_names], dtype=float)
-    degree = np.array([attr["degree"].get(n, 0.0) for n in node_names], dtype=float)
-    sizes = 300 + 1200 * (degree / degree.max() if degree.max() > 0 else degree + 1)
-    n = max(1, len(node_names))
-    angles = np.linspace(0, 2 * np.pi, num=n, endpoint=False)
-    pos = {node_names[i]: (np.cos(angles[i]), np.sin(angles[i])) for i in range(n)}
-    fig, ax = plt.subplots(figsize=(9, 7))
-    for src, dst in edges:
-        x1, y1 = pos[src]
-        x2, y2 = pos[dst]
-        ax.plot([x1, x2], [y1, y2], color="gray", linewidth=1.0, alpha=0.5, zorder=1)
+    nodes = _select_plot_nodes(all_nodes, edges, ranks, focus, radius, top_n)
+    visible = set(nodes)
+    edges = [(source, target) for source, target in edges if source in visible and target in visible]
+    positions = _layout_positions(nodes, edges, layout, seed)
+    values = np.array([ranks.get(node, 0.) for node in nodes], dtype=float)
+    degree = np.array([degrees.get(node, 0.) for node in nodes], dtype=float)
+    degree = np.maximum(np.nan_to_num(degree, nan=0., posinf=0., neginf=0.), 0.)
+    base_size = 300 * min(1., 30 / max(1, len(nodes)))
+    sizes = (base_size * (1 + 4 * (degree / degree.max()))
+             if degree.size and degree.max() else np.full(len(nodes), base_size))
+    coordinates = np.array([positions[node] for node in nodes]).reshape(-1, 2)
+    fig, ax = plt.subplots(figsize=figsize)
+    cmap = plt.get_cmap("Reds").with_extremes(bad="#bdbdbd")
+    full_values = np.array([ranks.get(node, 0.) for node in all_nodes], dtype=float)
+    finite = full_values[np.isfinite(full_values)]
     scatter = ax.scatter(
-        [pos[nm][0] for nm in node_names],
-        [pos[nm][1] for nm in node_names],
-        s=sizes,
-        c=rewiring,
-        cmap="Reds",
-        edgecolors="black",
-        linewidths=0.8,
-        zorder=2,
+        coordinates[:, 0], coordinates[:, 1], s=sizes,
+        c=values, cmap=cmap, plotnonfinite=True,
+        vmin=float(finite.min()) if finite.size else 0.,
+        vmax=float(finite.max()) if finite.size else 1.,
+        edgecolors="black", linewidths=0.6, zorder=2,
     )
-    for nm in node_names:
-        ax.text(pos[nm][0], pos[nm][1], nm, fontsize=10, fontweight="bold", ha="center", va="center", zorder=3)
-    fig.colorbar(scatter, ax=ax, label="rewiring")
+    alpha = 0.5 if len(nodes) <= 30 else 0.18
+    if len(edges) <= 200:
+        for source, target in edges:
+            segment = np.array([positions[source], positions[target]])
+            ax.plot(segment[:, 0], segment[:, 1], color="gray", linewidth=0.8, alpha=alpha, zorder=1)
+    else:
+        ax.add_collection(LineCollection([[positions[source], positions[target]] for source, target in edges],
+                                        colors="gray", linewidths=0.6, alpha=alpha, zorder=1))
+    label_nodes = _plot_labels(nodes, ranks, labels)
+    if isinstance(labels, str) and labels == "auto" and focus is not None and focus not in label_nodes:
+        label_nodes = label_nodes[:9] + [focus]
+    for node in label_nodes:
+        ax.text(*positions[node], node, fontsize=9, fontweight="bold", ha="center", va="center", zorder=3)
+    if np.isfinite(values).any():
+        fig.colorbar(scatter, ax=ax, label="rewiring")
+    if len(nodes) < len(all_nodes):
+        fig.suptitle(f"Showing {len(nodes)} of {len(all_nodes)} nodes")
+    elif not nodes:
+        fig.suptitle("No nodes to display")
     ax.set_axis_off()
     ax.set_aspect("equal")
+    ax.margins(0.15)
     fig.tight_layout()
     return fig
 
@@ -606,82 +684,106 @@ def small_multiples_plot(
     input_list: Union[Mapping[str, object], Sequence[object]],
     focus_node: str,
     mode: str = "focus_only",
+    *,
+    layout: str = "auto",
+    labels: Union[str, Iterable[object]] = "auto",
+    radius: int = 1,
+    max_nodes: Optional[int] = None,
+    seed: int = 0,
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> Figure:
-    """Draw one directed network panel per input, highlighting a focal node.
+    """Draw directed panels with shared positions for easier network comparison.
 
     Args:
         input_list: Raw or prepared networks accepted by ``prepare_networks``.
-        focus_node: Node label to highlight, converted to a string.
-        mode: ``focus_only`` includes only edges incident to the focal node;
-            ``r_compat`` includes all nonzero edges in each network.
+        focus_node: Highlighted node, converted to a string. It remains visible
+            even if isolated or absent from every input network.
+        mode: ``focus_only`` shows the induced union neighborhood within radius
+            hops of the focus. ``r_compat`` shows the full nonzero-edge union;
+            radius must remain at its default in this mode.
+        layout: ``auto``, ``circular``, ``spring``, or ``kamada_kawai``, with the
+            same optional dependency and auto behavior as ``rewiring_plot``.
+            Positions are calculated once from the selected union and reused.
+        labels: ``auto`` labels all visible nodes up to 30, otherwise only the
+            focus. Also accepts ``all``, ``none``, or an iterable of node IDs.
+        radius: Nonnegative undirected union-neighborhood hop distance.
+        max_nodes: Positive node cap, selecting by undirected union degree and
+            retaining the focus. Ties follow union order; None includes all.
+        seed: Nonnegative random seed for reproducible spring layouts.
+        figsize: Figure dimensions in inches, or None to size from panel count.
 
     Returns:
-        A matplotlib Figure. An absent or isolated focal node is still shown.
-            Panels show edge presence, not rewiring scores or edge-weight magnitude.
+        A matplotlib Figure with a panel for each network. All panels show the
+            same selected nodes; non-focal nodes absent from a network are gray.
+            The focus is red and edges retain each network's direction and
+            membership, including negative weights. Filtering is display-only.
 
     Raises:
-        ValueError: The mode is not recognized or a network input is invalid.
+        ValueError: Invalid display options or mode.
+        ImportError: An explicit layout needs missing optional dependencies.
     """
-    networks = prepare_networks(input_list)
-    focus_node = str(focus_node)
-
-    edges_by_network: list[pd.DataFrame] = []
     if mode not in {"focus_only", "r_compat"}:
         raise ValueError("mode must be 'focus_only' or 'r_compat'")
-
-    for name, network in networks.items():
-        el = network.edges()[["source", "target"]].copy()
-        if mode == "focus_only":
-            el = el[(el["source"] == focus_node) | (el["target"] == focus_node)]
-        el = el.copy()
-        el["id"] = name
-        edges_by_network.append(el)
-
-    all_edges = pd.concat(edges_by_network, ignore_index=True) if edges_by_network else pd.DataFrame()
-    plot_ids = list(networks)
-
-    n = max(1, len(plot_ids))
-    ncols = min(3, n)
-    nrows = int(np.ceil(n / ncols))
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5 * ncols, 5 * nrows), squeeze=False)
-    axes_flat = axes.ravel()
-
-    for idx, network_id in enumerate(plot_ids):
-        ax = axes_flat[idx]
-        subset = all_edges[all_edges["id"] == network_id] if not all_edges.empty else pd.DataFrame()
-        if subset.empty:
-            nodes = [focus_node]
-            edges = []
-        else:
-            nodes = _ordered_unique(
-                [focus_node] + subset["source"].tolist() + subset["target"].tolist()
-            )
-            edges = list(subset[["source", "target"]].itertuples(index=False, name=None))
-
-        m = max(1, len(nodes))
-        angles = np.linspace(0, 2 * np.pi, num=m, endpoint=False)
-        pos = {nodes[i]: (np.cos(angles[i]), np.sin(angles[i])) for i in range(m)}
-        for src, dst in edges:
-            x1, y1 = pos[src]
-            x2, y2 = pos[dst]
-            ax.annotate(
-                "",
-                xy=(x2, y2),
-                xytext=(x1, y1),
-                arrowprops=dict(arrowstyle="->", color="gray", alpha=0.4, lw=1.0),
-            )
-        colors = ["#d62728" if node == focus_node else "#1f77b4" for node in nodes]
-        ax.scatter([pos[nm][0] for nm in nodes], [pos[nm][1] for nm in nodes], c=colors, s=400, zorder=2)
-        for nm in nodes:
-            ax.text(pos[nm][0], pos[nm][1], nm, fontsize=9, fontweight="bold", ha="center", va="center", zorder=3)
-        ax.set_title(network_id)
+    if mode == "r_compat" and radius != 1:
+        raise ValueError("radius is only configurable with mode='focus_only'")
+    networks = prepare_networks(input_list)
+    focus_node = str(focus_node)
+    count = max(1, len(networks))
+    ncols = min(3, count)
+    nrows = int(np.ceil(count / ncols))
+    dimensions = figsize if figsize is not None else (5 * ncols, 5 * nrows)
+    labels = _plot_options(layout, labels, radius, max_nodes, seed, dimensions)
+    all_nodes = _ordered_unique([focus_node] + list(networks.node_names))
+    order = {node: i for i, node in enumerate(all_nodes)}
+    panel_edges = {name: list(network.edges()[["source", "target"]].itertuples(index=False, name=None))
+                   for name, network in networks.items()}
+    union = {tuple(sorted(edge, key=order.__getitem__)) for edges in panel_edges.values() for edge in edges}
+    edges = sorted(union, key=lambda edge: (order[edge[0]], order[edge[1]]))
+    degree = dict.fromkeys(all_nodes, 0.)
+    for source, target in edges:
+        degree[source] += 1
+        if source != target:
+            degree[target] += 1
+    nodes = _select_plot_nodes(all_nodes, edges, degree,
+                               focus_node if mode == "focus_only" else None, radius, None)
+    nodes = _limit_plot_nodes(nodes, degree, max_nodes, focus_node)
+    visible = set(nodes)
+    edges = [(source, target) for source, target in edges if source in visible and target in visible]
+    positions = _layout_positions(nodes, edges, layout, seed)
+    coordinates = np.array([positions[node] for node in nodes]).reshape(-1, 2)
+    label_nodes = _plot_labels(nodes, degree, labels, focus=focus_node)
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=dimensions, squeeze=False)
+    node_size = 400 * min(1., 30 / max(1, len(nodes)))
+    arrow_margin = np.sqrt(node_size) / 2 + 1
+    missing = False
+    for ax, (name, network) in zip(axes.ravel(), networks.items()):
+        for source, target in panel_edges[name]:
+            if source in visible and target in visible:
+                ax.annotate("", xy=positions[target], xytext=positions[source],
+                            arrowprops=dict(arrowstyle="-|>", color="gray", alpha=0.4, lw=0.8,
+                                            shrinkA=arrow_margin, shrinkB=arrow_margin), zorder=1)
+        present = set(network.nodes)
+        missing = missing or any(node not in present and node != focus_node for node in nodes)
+        colors = ["#d62728" if node == focus_node else "#1f77b4" if node in present else "#dddddd" for node in nodes]
+        ax.scatter(coordinates[:, 0], coordinates[:, 1], c=colors, s=node_size, zorder=2)
+        for node in label_nodes:
+            ax.text(*positions[node], node, fontsize=9, fontweight="bold", ha="center", va="center", zorder=3)
+        ax.set_title(name)
         ax.set_axis_off()
         ax.set_aspect("equal")
-
-    for idx in range(len(plot_ids), len(axes_flat)):
-        axes_flat[idx].set_axis_off()
-
-    fig.tight_layout()
+        ax.margins(0.15)
+    for ax in axes.ravel()[len(networks):]:
+        ax.set_axis_off()
+    captions = []
+    if len(nodes) < len(all_nodes):
+        captions.append(f"Showing {len(nodes)} of {len(all_nodes)} union nodes")
+    if missing:
+        captions.append("Gray nodes are absent from that network")
+    if not networks:
+        captions.append("No networks to display")
+    if captions:
+        fig.text(0.5, 0.01, "; ".join(captions), ha="center", fontsize=9)
+    fig.tight_layout(rect=(0, 0.04 if captions else 0, 1, 1))
     return fig
 
 

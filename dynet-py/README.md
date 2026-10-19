@@ -67,6 +67,15 @@ python -m pip install -U pip
 python -m pip install -e .
 ```
 
+Install optional NetworkX layouts for network figures:
+
+```bash
+python -m pip install -e ".[plot]"
+```
+
+This extra adds NetworkX and SciPy for spring and Kamada–Kawai layouts. Circular
+plots and sparse rewiring calculations do not require these dependencies.
+
 Install docs tooling:
 
 ```bash
@@ -124,6 +133,63 @@ networks = prepare_networks({"net1": el1, "net2": el2})
 res = rewiring_analysis(networks)
 fig = rewiring_plot(networks, res)
 ```
+
+## Plotting larger networks
+
+Plots choose a layout and limit labels automatically. `layout="auto"` uses a
+circular layout for up to 30 nodes and more than 500 nodes. For 31–500 nodes,
+it uses a spring layout when the optional plotting dependencies are installed,
+and otherwise falls back to circular. `labels="auto"` labels every displayed
+node up to 30 nodes, then only the 10 with the highest rewiring scores. A focal
+node is always included among those automatic labels.
+
+Use a smaller view when the full network becomes crowded:
+
+```python
+from dynet_py import small_multiples_plot
+
+top_labels = res.sort_values("rewiring", ascending=False)["name"].head(10)
+
+# Show the 40 highest-scoring nodes and edges between them.
+fig = rewiring_plot(
+    networks, res, top_n=40, layout="spring", labels=top_labels, seed=0,
+)
+
+# Inspect a node's neighborhood, with a cap on the displayed node count.
+fig = rewiring_plot(
+    networks, res, focus_node="A", radius=2, top_n=40, layout="spring",
+)
+
+# Compare that neighborhood across networks using the same node positions.
+fig = small_multiples_plot(
+    networks, focus_node="A", radius=2, max_nodes=40, layout="spring", seed=0,
+)
+```
+
+Neighborhoods follow incoming and outgoing edges across the networks. `top_n` retains the
+highest rewiring scores within the selected neighborhood and always includes
+the focal node. Small multiples use union degree for their `max_nodes` cap,
+because they do not take a score table. Each panel retains its own directed
+edges, and shared positions make changes easier to follow.
+All panels show the same selected union nodes. Gray non-focal nodes are absent
+from that condition; the focal node is red.
+
+These options change the figure only: scores still describe the full input
+networks. Rewiring colors use the full supplied score range, so full and filtered
+views remain comparable. Filtered figures show the displayed node count. Set `labels="none"`
+to hide labels, `labels="all"` to show all of them, or pass selected node names.
+Use an explicit layout and seed when comparing figures across runs.
+
+Try the reproducible [large-network plotting example](examples/large_network_plotting.py):
+
+```bash
+python -m pip install -e ".[plot]"
+python examples/large_network_plotting.py
+```
+
+It generates three synthetic 180-node networks, calculates scores with the
+sparse backend, and saves full, ranked, and neighborhood figures alongside
+the input edge lists and scores under `examples/large_network_output/`.
 
 ## Jupyter tutorial
 

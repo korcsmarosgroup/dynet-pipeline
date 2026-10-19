@@ -3,12 +3,27 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import pandas as pd
 
 from .core import (
     _resolve_edge_columns, prepare_networks, compare_targeting,
     rewiring_analysis, rewiring_plot, small_multiples_plot,
 )
+
+
+def _nonnegative_int(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be a nonnegative integer")
+    return number
+
+
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
 
 
 def _parse_args() -> argparse.Namespace:
@@ -48,6 +63,20 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Focus node used for small multiples plot (defaults to top rewired node).",
     )
+    parser.add_argument("--plot-layout", choices=("auto", "circular", "spring", "kamada_kawai"),
+                        default="auto", help="Layout for both figures; explicit spring/Kamada-Kawai needs .[plot].")
+    parser.add_argument("--plot-labels", choices=("auto", "all", "none"), default="auto",
+                        help="Node labeling policy for both figures.")
+    parser.add_argument("--plot-top-n", type=_positive_int, default=None,
+                        help="Show at most N nodes ranked by rewiring in the union figure.")
+    parser.add_argument("--plot-focus-node", default=None,
+                        help="Optional neighborhood center for the rewiring union figure.")
+    parser.add_argument("--plot-radius", type=_nonnegative_int, default=1,
+                        help="Union-neighborhood radius for both figures (default: 1).")
+    parser.add_argument("--panel-max-nodes", type=_positive_int, default=None,
+                        help="Cap small panels by union degree, retaining their focus node.")
+    parser.add_argument("--plot-seed", type=_nonnegative_int, default=0,
+                        help="Random seed for reproducible layouts (default: 0).")
     return parser.parse_args()
 
 
@@ -87,21 +116,31 @@ def main() -> None:
 
     networks = prepare_networks(networks)
 
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     rewiring = rewiring_analysis(networks, structure_only=args.structure_only, backend=args.backend)
-    rewiring.to_csv(out_dir / "dynet_py_output.csv", index=False)
-
     targeting = compare_targeting(networks)
-    targeting.to_csv(out_dir / "compare_targeting.csv", index=False)
-
-    focus_node = args.focus_node or str(rewiring.sort_values("rewiring", ascending=False)["name"].iloc[0])
-
-    fig1 = rewiring_plot(networks, rewiring, structure_only=args.structure_only)
-    fig1.savefig(out_dir / "dynet_py_plot.png", dpi=150, bbox_inches="tight")
-    fig2 = small_multiples_plot(networks, focus_node=focus_node)
-    fig2.savefig(out_dir / "small_multiples_plot.png", dpi=150, bbox_inches="tight")
+    focus_node = args.focus_node or (
+        str(rewiring.sort_values("rewiring", ascending=False)["name"].iloc[0]) if len(rewiring) else "focus"
+    )
+    figures = []
+    try:
+        figures.append(rewiring_plot(
+            networks, rewiring, structure_only=args.structure_only,
+            layout=args.plot_layout, labels=args.plot_labels, top_n=args.plot_top_n,
+            focus_node=args.plot_focus_node, radius=args.plot_radius, seed=args.plot_seed,
+        ))
+        figures.append(small_multiples_plot(
+            networks, focus_node=focus_node, layout=args.plot_layout, labels=args.plot_labels,
+            radius=args.plot_radius, max_nodes=args.panel_max_nodes, seed=args.plot_seed,
+        ))
+        out_dir = Path(args.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        rewiring.to_csv(out_dir / "dynet_py_output.csv", index=False)
+        targeting.to_csv(out_dir / "compare_targeting.csv", index=False)
+        figures[0].savefig(out_dir / "dynet_py_plot.png", dpi=150, bbox_inches="tight")
+        figures[1].savefig(out_dir / "small_multiples_plot.png", dpi=150, bbox_inches="tight")
+    finally:
+        for figure in figures:
+            plt.close(figure)
 
     print(f"Wrote results to {out_dir.resolve()}")
 
